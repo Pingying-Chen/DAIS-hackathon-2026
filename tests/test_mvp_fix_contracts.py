@@ -183,6 +183,70 @@ def test_run_agent_returns_review_board_v3_contract(monkeypatch) -> None:
     assert result["board_summary"].startswith("Convoy Review Board v3")
     assert board[-1]["verdict"] == "shortlist with monitoring"
     assert board[-1]["confidence"] == "High Confidence"
+    assert result["confidence_label"] == "High Confidence"
+    assert result["summary_source"] == "deterministic fallback"
+
+
+def test_run_agent_uses_board_confidence_when_citations_are_missing(monkeypatch) -> None:
+    districts = _frame(
+        [
+            {
+                "district": "Nagpur",
+                "state": "Maharashtra",
+                "need_score": 82.0,
+                "coverage_gap": 64.0,
+                "facility_count": 7,
+                "evidence_score": 71.0,
+                "priority_score": 79.0,
+                "uncertainty_label": "Moderate Confidence",
+                "risk_flags": "",
+            }
+        ],
+        "live",
+    )
+    facilities = _frame(
+        [
+            {
+                "unique_id": "facility-1",
+                "name": "Wockhardt Hospital Nagpur",
+                "address_city": "Nagpur",
+                "address_stateOrRegion": "Maharashtra",
+                "capability_fit": 88.0,
+                "trust_score": 82.0,
+                "confidence_label": "High Confidence",
+                "specialties": "",
+                "procedure": "",
+                "equipment": "",
+                "capability": "",
+                "description": "",
+                "source_urls": "",
+                "resolved_entity_id": "entity-01",
+                "entity_record_count": 1,
+                "website_verification_status": "verified",
+                "risk_flags": "",
+            }
+        ],
+        "live",
+    )
+    facilities.attrs["trust_reviews"] = pd.DataFrame()
+
+    monkeypatch.setattr(reasoning, "get_district_priorities", lambda *args, **kwargs: districts)
+    monkeypatch.setattr(reasoning, "get_facility_candidates", lambda *args, **kwargs: facilities)
+    monkeypatch.setattr(reasoning, "build_evidence_rows", lambda df, trust_reviews=None: pd.DataFrame(columns=["facility_id", "facility_name", "claim_type", "evidence", "source_url"]))
+    monkeypatch.setattr(reasoning, "_llm_summary", lambda prompt: None)
+
+    result = reasoning.run_agent(
+        mission_type="maternal_health",
+        mission_label="Maternal Health",
+        state_filter="Maharashtra",
+        district_filter="",
+        confidence_threshold=0.25,
+        run_id="test-run",
+    )
+
+    assert result["review_board"][-1]["verdict"] == "hold for evidence"
+    assert result["confidence_label"] == "Weak Evidence"
+    assert "No facility citation rows were available" in " ".join(result["warnings"])
 
 
 def test_run_agent_does_not_warn_for_string_false_duplicate_review(monkeypatch) -> None:
@@ -427,7 +491,7 @@ def test_list_user_decisions_returns_empty_frame_on_boundary_error(monkeypatch) 
     rows = lakebase.list_user_decisions(limit=5)
 
     assert rows.empty
-    assert list(rows.columns) == ["created_at", "mission_type", "district", "facility_id", "decision", "note"]
+    assert list(rows.columns) == ["created_at", "mission_type", "district", "facility_id", "decision", "note", "metadata_json"]
     assert "Lakebase shortlist is temporarily unavailable" in rows.attrs["error"]
 
 

@@ -18,6 +18,7 @@ Care Convoy is a Databricks Apps MVP for the Virtue Foundation hackathon. The ap
 - The repo now includes a Databricks Asset Bundle in [databricks.yml](databricks.yml) and [resources/care_convoy_app.app.yml](resources/care_convoy_app.app.yml).
 - The app resource declares native dependencies on Lakebase, the SQL warehouse, and the serving endpoint.
 - The existing `care-convoy` app is now bound to the bundle resource `care_convoy_app`.
+- [app.yaml](app.yaml) explicitly starts Streamlit on port `8080`, address `0.0.0.0`, and headless mode for Databricks Apps.
 - Preferred deploy flow:
   1. `databricks bundle validate --strict --profile "databricks-profile"`
   2. `DATABRICKS_AUTH_VALUE="$(databricks auth token --profile "databricks-profile" | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')" DATABRICKS_TF_EXEC_PATH=terraform databricks bundle deploy -t dev --profile "databricks-profile"`
@@ -36,6 +37,7 @@ Current deployed app URL:
 - `v2.1` - Introduced the redesigned stage-based UI, canonical entity ranking improvements, KPI fixes, and safer trust-review handling for missing website signals. Reference commits: `6581107`, `88ec866`, `39a0932`, `738903d`.
 - `v2.2` - Reframed the app as a referral copilot with trust-backed stage views and fixed the clipped results layout that could hide post-run output in the live app. Reference commits: `a84c278`, `988e99d`.
 - `v3.0` - Added Convoy Review Board v3, a six-agent decision layer that reviews district need, facility fit, Trust Desk v2 evidence, citation safety, and supervisor approval before shortlist persistence.
+- `v3.1` - Hardened the v3 validation loop with parameterized SQL filters, guarded public-page scraping, Lakebase metadata readback, model-summary provenance, app boot coverage, and a clean dependency audit.
 
 ## Native Design Baseline
 
@@ -67,9 +69,12 @@ Current deployed app URL:
 
 Latest smoke test:
 
-- Local deterministic tests: `pytest tests/ -q` returned `16 passed`.
+- Local deterministic tests: `python3 -m pytest tests/ -q` returned `27 passed`.
 - Syntax gate: `python3 -m compileall src` passed.
+- Dependency audit: `python3 -m pip_audit -r requirements.txt` returned `No known vulnerabilities found`.
 - Live agent smoke returned all six board agents with supervisor verdict `shortlist after review`, confidence `Moderate Confidence`, and `tradeoff_chart_built=True`.
+- Lakebase read-after-write smoke through the app persistence layer returned a v3 validation shortlist row with board verdict, board confidence, facility name, and agent metadata.
+- Remaining human gate: complete an authenticated hosted-app click-through for Review Board, Trust Evidence, shortlist save, refresh, and readback before making final demo-ready claims.
 
 ## What stays local-only
 

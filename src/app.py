@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 import uuid
@@ -110,8 +111,42 @@ def _show_empty_state() -> None:
 
 def _result_status_messages(result: dict[str, Any]) -> list[tuple[str, str]]:
     messages: list[tuple[str, str]] = [("info", result["provenance"])]
+    if result.get("summary_source"):
+        messages.append(("info", f"Mission brief source: {result['summary_source']}"))
     messages.extend(("warn", warning) for warning in result["warnings"])
     return messages
+
+
+def _shortlist_display(saved: pd.DataFrame) -> pd.DataFrame:
+    if saved.empty or "metadata_json" not in saved.columns:
+        return saved
+    display = saved.copy()
+    metadata = display["metadata_json"].apply(_parse_metadata)
+    display["board_verdict"] = metadata.apply(lambda value: value.get("board_verdict", ""))
+    display["board_confidence"] = metadata.apply(lambda value: value.get("board_confidence", ""))
+    display["facility_name"] = metadata.apply(lambda value: value.get("facility_name", ""))
+    return display[
+        [
+            "created_at",
+            "mission_type",
+            "district",
+            "facility_name",
+            "decision",
+            "board_verdict",
+            "board_confidence",
+            "note",
+        ]
+    ]
+
+
+def _parse_metadata(raw: Any) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(str(raw))
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _show_overview(result: dict[str, Any]) -> None:
@@ -394,7 +429,7 @@ def _show_shortlist(result: dict[str, Any]) -> None:
         if saved_error:
             st.warning(saved_error)
         elif not saved.empty:
-            st.dataframe(saved, use_container_width=True, hide_index=True, height=310)
+            st.dataframe(_shortlist_display(saved), use_container_width=True, hide_index=True, height=310)
         else:
             card(
                 "No shortlist entries yet",

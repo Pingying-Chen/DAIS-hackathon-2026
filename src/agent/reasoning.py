@@ -317,6 +317,8 @@ def run_agent(
         warnings.append("District prioritization is using fallback data until a stronger live join is in place.")
     if facility_source != "live":
         warnings.append("Facility ranking is using demo-safe fallback data because no live anchor rows were returned.")
+    if citations.empty:
+        warnings.append("No facility citation rows were available, so the board should hold or qualify the recommendation.")
     if _missing_source_count(citations):
         warnings.append("Some facility claims do not have source URLs yet and should stay in review.")
     if trust_reviews is not None and not trust_reviews.empty:
@@ -348,17 +350,23 @@ def run_agent(
         f"Warnings: {warnings}\n"
         "Use only the supplied evidence, be explicit about uncertainty, and keep the answer to three sentences."
     )
-    summary = _llm_summary(prompt) or _deterministic_summary(
-        mission_label=mission_label,
-        state_filter=state_filter,
-        top_district=top_district,
-        top_facility=top_facility,
-        top_trust_review=top_trust_review,
-        warnings=warnings,
-    )
+    summary_source = "Databricks model serving"
+    summary = _llm_summary(prompt)
+    if not summary:
+        summary_source = "deterministic fallback"
+        summary = _deterministic_summary(
+            mission_label=mission_label,
+            state_filter=state_filter,
+            top_district=top_district,
+            top_facility=top_facility,
+            top_trust_review=top_trust_review,
+            warnings=warnings,
+        )
 
     confidence_label = "Weak Evidence"
-    if not facilities.empty:
+    if review_board:
+        confidence_label = review_board[-1]["confidence"]
+    elif not facilities.empty:
         confidence_label = str(facilities.iloc[0]["confidence_label"])
 
     provenance = _provenance_label(district_source, facility_source)
@@ -367,6 +375,7 @@ def run_agent(
         "mission_type": mission_type,
         "mission_label": mission_label,
         "summary": summary,
+        "summary_source": summary_source,
         "confidence_label": confidence_label,
         "districts": districts,
         "facilities": facilities,

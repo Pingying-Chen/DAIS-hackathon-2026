@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from html import unescape
+import ipaddress
 import re
+import socket
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -29,6 +31,8 @@ _USER_AGENT = (
 _EMAIL_PATTERN = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 _PHONE_PATTERN = re.compile(r"(\+\d{1,3}[\s-]?)?(\d[\s-]?){8,14}")
 _SOCIAL_DOMAINS = ("facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "youtube.com")
+_BLOCKED_HOSTS = {"localhost", "metadata.google.internal"}
+_BLOCKED_SUFFIXES = (".local", ".internal")
 
 
 def _empty_search_frame() -> pd.DataFrame:
@@ -46,6 +50,56 @@ def _extract_result_url(raw_url: str) -> str:
     if raw_url.startswith("//"):
         return f"https:{raw_url}"
     return raw_url.strip()
+
+
+def _url_domain(url: str) -> str:
+    try:
+        return urlparse(url).netloc.lower()
+    except (TypeError, ValueError, UnicodeError):
+        return ""
+
+
+def _blocked_ip(address: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return any(
+        [
+            ip.is_private,
+            ip.is_loopback,
+            ip.is_link_local,
+            ip.is_multicast,
+            ip.is_reserved,
+            ip.is_unspecified,
+        ]
+    )
+
+
+def _safe_public_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except (TypeError, ValueError, UnicodeError):
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    if parsed.username or parsed.password:
+        return False
+    try:
+        hostname = (parsed.hostname or "").strip().lower().rstrip(".")
+    except (ValueError, UnicodeError):
+        return False
+    if not hostname:
+        return False
+    if hostname in _BLOCKED_HOSTS or hostname.endswith(_BLOCKED_SUFFIXES):
+        return False
+    if _blocked_ip(hostname):
+        return False
+    try:
+        addresses = socket.getaddrinfo(hostname, None)
+    except OSError:
+        return False
+    return not any(_blocked_ip(item[4][0]) for item in addresses)
 
 
 def search_public_web(query: str, limit: int = 5, timeout_seconds: int = 4) -> pd.DataFrame:
@@ -96,23 +150,33 @@ def search_public_web(query: str, limit: int = 5, timeout_seconds: int = 4) -> p
 def scrape_public_page(url: str, timeout_seconds: int = 4) -> dict[str, Any]:
     if not url.strip():
         return dict(SCRAPE_DEFAULTS)
+    if not _safe_public_url(url):
+        return {**SCRAPE_DEFAULTS, "url": url, "domain": _url_domain(url), "status": "blocked_url"}
 
     try:
         response = requests.get(
             url,
             headers={"User-Agent": _USER_AGENT},
             timeout=timeout_seconds,
+            allow_redirects=False,
         )
+        if 300 <= response.status_code < 400:
+            return {
+                **SCRAPE_DEFAULTS,
+                "url": url,
+                "domain": _url_domain(url),
+                "status": "redirect_blocked",
+            }
         response.raise_for_status()
     except requests.RequestException:
-        return {**SCRAPE_DEFAULTS, "url": url, "domain": urlparse(url).netloc.lower()}
+        return {**SCRAPE_DEFAULTS, "url": url, "domain": _url_domain(url)}
 
     content_type = response.headers.get("content-type", "")
     if "html" not in content_type:
         return {
             **SCRAPE_DEFAULTS,
             "url": url,
-            "domain": urlparse(url).netloc.lower(),
+            "domain": _url_domain(url),
             "status": "non_html",
         }
 
@@ -140,7 +204,7 @@ def scrape_public_page(url: str, timeout_seconds: int = 4) -> dict[str, Any]:
 
     return {
         "url": url,
-        "domain": urlparse(url).netloc.lower(),
+        "domain": _url_domain(url),
         "status": "ok",
         "page_title": title,
         "meta_description": meta_description,

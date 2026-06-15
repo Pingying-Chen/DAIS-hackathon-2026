@@ -375,9 +375,10 @@ def get_district_priorities(
     confidence_threshold: float,
 ) -> pd.DataFrame:
     state_clause = ""
+    parameters: dict[str, object] = {}
     if state_filter:
-        safe_state = state_filter.replace("'", "''")
-        state_clause = f"where lower(state_ut) like lower('%{safe_state}%')"
+        state_clause = "where lower(state_ut) like lower(:state_filter)"
+        parameters["state_filter"] = f"%{state_filter}%"
 
     sql = f"""
     select
@@ -391,13 +392,13 @@ def get_district_priorities(
     {state_clause}
     limit 50
     """
-    raw = run_sql(sql)
+    raw = run_sql(sql, parameters=parameters)
     if raw.empty:
         return _fallback_districts(state_filter)
 
     df = raw.rename(columns=str)
     if district_filter:
-        df = df[df["district"].str.contains(district_filter, case=False, na=False)]
+        df = df[df["district"].str.contains(district_filter, case=False, na=False, regex=False)]
     if df.empty:
         return _fallback_districts(state_filter)
 
@@ -668,7 +669,10 @@ def search_facility_sources(df: pd.DataFrame, limit: int = 3, allow_search: bool
             )
             continue
 
-        results = search_public_web(row.search_query, limit=limit)
+        try:
+            results = search_public_web(row.search_query, limit=limit)
+        except Exception:
+            results = _empty_search_results()
         if results.empty:
             rows.append(
                 {
@@ -800,7 +804,19 @@ def collect_website_signals(
             )
             continue
 
-        page = scrape_public_page(primary_url)
+        try:
+            page = scrape_public_page(primary_url)
+        except Exception:
+            page = {
+                "url": primary_url,
+                "domain": primary_domain,
+                "status": "unavailable",
+                "page_title": "",
+                "meta_description": "",
+                "text_excerpt": "",
+                "social_links": 0,
+                "contact_signals": 0,
+            }
         page_text = " ".join(
             [
                 _safe_text(page.get("page_title")),
@@ -1052,18 +1068,19 @@ def get_facility_candidates(
     confidence_threshold: float,
 ) -> pd.DataFrame:
     keyword_filter = _keyword_sql(mission_type)
+    parameters: dict[str, object] = {}
     state_clause = "1 = 1"
     if state_filter:
-        safe_state = state_filter.replace("'", "''")
-        state_clause = f"coalesce(lower(address_stateOrRegion), '') like lower('%{safe_state}%')"
+        state_clause = "coalesce(lower(address_stateOrRegion), '') like lower(:state_filter)"
+        parameters["state_filter"] = f"%{state_filter}%"
 
     district_clause = "1 = 1"
     if district_filter:
-        safe_district = district_filter.replace("'", "''")
         district_clause = (
-            "coalesce(lower(address_city), '') like lower('%{value}%') or "
-            "coalesce(lower(address_zipOrPostcode), '') like lower('%{value}%')"
-        ).format(value=safe_district)
+            "coalesce(lower(address_city), '') like lower(:district_filter) or "
+            "coalesce(lower(address_zipOrPostcode), '') like lower(:district_filter)"
+        )
+        parameters["district_filter"] = f"%{district_filter}%"
 
     sql = f"""
     select
@@ -1094,7 +1111,7 @@ def get_facility_candidates(
       and ({keyword_filter})
     limit 40
     """
-    raw = run_sql(sql)
+    raw = run_sql(sql, parameters=parameters)
     if raw.empty:
         return _build_facility_review_frame(
             _fallback_facilities(state_filter),

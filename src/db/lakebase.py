@@ -23,7 +23,15 @@ except ImportError:  # pragma: no cover
 
 _SCHEMA_FALLBACK = "care_convoy"
 _IDENTIFIER_PATTERN = re.compile(r"[^a-z0-9_]+")
-_USER_DECISION_COLUMNS = ["created_at", "mission_type", "district", "facility_id", "decision", "note"]
+_USER_DECISION_COLUMNS = [
+    "created_at",
+    "mission_type",
+    "district",
+    "facility_id",
+    "decision",
+    "note",
+    "metadata_json",
+]
 
 
 def _schema_name() -> str:
@@ -52,10 +60,13 @@ def _workspace_client() -> object | None:
     if WorkspaceClient is None:
         return None
 
-    profile = os.environ.get("DATABRICKS_CONFIG_PROFILE") or os.environ.get("DATABRICKS_PROFILE")
-    if profile:
-        return WorkspaceClient(profile=profile)
-    return WorkspaceClient()
+    try:
+        profile = os.environ.get("DATABRICKS_CONFIG_PROFILE") or os.environ.get("DATABRICKS_PROFILE")
+        if profile:
+            return WorkspaceClient(profile=profile)
+        return WorkspaceClient()
+    except Exception:
+        return None
 
 
 @lru_cache(maxsize=1)
@@ -68,8 +79,11 @@ def _resolve_local_connection_settings() -> dict[str, str] | None:
     if client is None:
         return None
 
-    endpoint = client.postgres.get_endpoint(name=endpoint_name)
-    current_user = client.current_user.me().user_name
+    try:
+        endpoint = client.postgres.get_endpoint(name=endpoint_name)
+        current_user = client.current_user.me().user_name
+    except Exception:
+        return None
     return {
         "host": endpoint.status.hosts.host,
         "port": os.environ.get("PGPORT", "5432"),
@@ -99,7 +113,10 @@ def _connection_settings() -> dict[str, str] | None:
             "sslmode": os.environ.get("PGSSLMODE", "require"),
             "endpoint_name": os.environ["LAKEBASE_ENDPOINT"],
         }
-    return _resolve_local_connection_settings()
+    try:
+        return _resolve_local_connection_settings()
+    except Exception:
+        return None
 
 
 def lakebase_available() -> bool:
@@ -225,12 +242,12 @@ def list_user_decisions(limit: int = 10) -> pd.DataFrame:
         ensure_tables()
         with get_connection() as connection:
             if connection is None or pg_sql is None:
-                return _empty_user_decisions()
+                return _empty_user_decisions("Lakebase shortlist is not configured for this runtime.")
             with connection.cursor() as cursor:
                 cursor.execute(
                     pg_sql.SQL(
                         """
-                        select created_at, mission_type, district, facility_id, decision, note
+                        select created_at, mission_type, district, facility_id, decision, note, metadata_json
                         from {}
                         order by created_at desc
                         limit %s

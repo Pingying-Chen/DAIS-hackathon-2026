@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+from typing import Mapping
 
 import pandas as pd
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.sql import Disposition, Format
+from databricks.sdk.service.sql import Disposition, Format, StatementParameterListItem
 
 
 def _workspace_client() -> WorkspaceClient:
@@ -32,7 +33,20 @@ def _extract_response_rows(response: object) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns)
 
 
-def run_sql(statement: str, timeout_seconds: int = 20) -> pd.DataFrame:
+def _statement_parameters(parameters: Mapping[str, object] | None) -> list[StatementParameterListItem] | None:
+    if not parameters:
+        return None
+    return [
+        StatementParameterListItem(name=name, type="STRING", value=str(value))
+        for name, value in parameters.items()
+    ]
+
+
+def run_sql(
+    statement: str,
+    timeout_seconds: int = 20,
+    parameters: Mapping[str, object] | None = None,
+) -> pd.DataFrame:
     warehouse_id = os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
     if not warehouse_id:
         return pd.DataFrame()
@@ -43,6 +57,7 @@ def run_sql(statement: str, timeout_seconds: int = 20) -> pd.DataFrame:
             warehouse_id=warehouse_id,
             disposition=Disposition.INLINE,
             format=Format.JSON_ARRAY,
+            parameters=_statement_parameters(parameters),
             wait_timeout=f"{min(timeout_seconds, 20)}s",
         )
     except Exception:

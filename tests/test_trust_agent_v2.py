@@ -108,6 +108,22 @@ def test_search_facility_sources_prefers_dataset_url(monkeypatch) -> None:
     assert bool(search_results.iloc[0]["selected"]) is True
 
 
+def test_search_facility_sources_returns_unavailable_row_when_search_fails(monkeypatch) -> None:
+    cleaned = tools._clean_facility_candidates(_facility_rows().tail(1))
+    resolved = tools.resolve_facility_entities(cleaned)
+
+    def fake_search_public_web(query: str, limit: int = 5) -> pd.DataFrame:
+        raise ConnectionError("search unavailable")
+
+    monkeypatch.setattr(tools, "search_public_web", fake_search_public_web)
+
+    search_results = tools.search_facility_sources(resolved)
+
+    assert list(search_results.columns) == tools.SEARCH_RESULT_COLUMNS
+    assert search_results.iloc[0]["selection_source"] == "search_unavailable"
+    assert bool(search_results.iloc[0]["selected"]) is False
+
+
 def test_collect_website_signals_returns_typed_row_when_scrape_fails(monkeypatch) -> None:
     cleaned = tools._clean_facility_candidates(_facility_rows().head(1))
     resolved = tools.resolve_facility_entities(cleaned)
@@ -132,6 +148,23 @@ def test_collect_website_signals_returns_typed_row_when_scrape_fails(monkeypatch
     assert list(signals.columns) == tools.WEBSITE_SIGNAL_COLUMNS
     assert signals.iloc[0]["page_status"] == "unavailable"
     assert int(signals.iloc[0]["social_link_count"]) == 0
+
+
+def test_collect_website_signals_returns_unavailable_row_when_scraper_raises(monkeypatch) -> None:
+    cleaned = tools._clean_facility_candidates(_facility_rows().head(1))
+    resolved = tools.resolve_facility_entities(cleaned)
+    search_results = tools.search_facility_sources(resolved, allow_search=False)
+
+    def fake_scrape_public_page(url: str) -> dict[str, object]:
+        raise TimeoutError("scrape timed out")
+
+    monkeypatch.setattr(tools, "scrape_public_page", fake_scrape_public_page)
+
+    signals = tools.collect_website_signals(resolved, search_results, allow_web_enrichment=True)
+
+    assert list(signals.columns) == tools.WEBSITE_SIGNAL_COLUMNS
+    assert signals.iloc[0]["page_status"] == "unavailable"
+    assert signals.iloc[0]["website_excerpt"] == ""
 
 
 def test_build_trust_reviews_prefers_high_signal_facility() -> None:
