@@ -1,5 +1,6 @@
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
+scripts/__pycache__/
 *.pyc
 *.pyo
 *.pyd
@@ -27,14 +28,20 @@ databricks-token.txt
 .databricks/
 bundle.lock
 *.ipynb_checkpoints/
+
+# ── Local coding-agent overlay ────────────────────────────────────────────────
 .agents/
 .codex/
 AGENTS.md
+RTK.md
+CLAUDE.md
+.claude/
+.cursor/
+.continue/
+.windsurf/
+.aider*
 templates/
-scripts/reconfigure.py
-scripts/audit-agent-kit.py
-scripts/check-design-conformance.py
-scripts/check-hackathon-loop.py
+scripts/
 
 # ── Video/media (upload to YouTube instead — Rule 4.3e) ──────────────────────
 *.webm
