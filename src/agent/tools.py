@@ -858,32 +858,45 @@ def build_trust_reviews(
 
     rows: list[dict[str, Any]] = []
     for row in merged.to_dict(orient="records"):
+        distinct_social_count = _parse_number(row.get("distinct_social_media_presence_count"))
+        affiliated_staff_presence = _parse_number(row.get("affiliated_staff_presence"))
+        custom_logo_presence = _parse_number(row.get("custom_logo_presence"))
+        capability_mentions = int(_parse_number(row.get("capability_mentions")))
+        contact_signal_count = int(_parse_number(row.get("contact_signal_count")))
+        social_link_count = int(_parse_number(row.get("social_link_count")))
+        name_match_score = _parse_number(row.get("name_match_score"))
+        entity_match_confidence = _parse_number(row.get("entity_match_confidence"))
+        entity_record_count = max(int(_parse_number(row.get("entity_record_count"))) or 0, 1)
+        evidence_count = _parse_number(row.get("evidence_count"))
+        freshness_signal = _parse_number(row.get("freshness_signal"))
+        domain_matches_dataset = bool(row.get("domain_matches_dataset")) if pd.notna(row.get("domain_matches_dataset")) else False
+
         dataset_social_score = min(
             28.0,
-            row.get("distinct_social_media_presence_count", 0) * 6
-            + row.get("affiliated_staff_presence", 0) * 8
-            + row.get("custom_logo_presence", 0) * 5,
+            distinct_social_count * 6
+            + affiliated_staff_presence * 8
+            + custom_logo_presence * 5,
         )
         website_signal_score = min(
             38.0,
-            row.get("capability_mentions", 0) * 5
-            + row.get("contact_signal_count", 0) * 3
-            + row.get("social_link_count", 0) * 2
-            + row.get("name_match_score", 0) * 15
-            + (8 if row.get("domain_matches_dataset") else 0),
+            capability_mentions * 5
+            + contact_signal_count * 3
+            + social_link_count * 2
+            + name_match_score * 15
+            + (8 if domain_matches_dataset else 0),
         )
         resolution_signal_score = max(
             0.0,
             min(
                 18.0,
-                row.get("entity_match_confidence", 0) * 12
-                + min(row.get("entity_record_count", 1), 3) * 2
+                entity_match_confidence * 12
+                + min(entity_record_count, 3) * 2
                 - (5 if row.get("duplicate_review_required") else 0),
             ),
         )
         freshness_signal_score = min(
             16.0,
-            row.get("freshness_signal", 0)
+            freshness_signal
             + (4 if row.get("page_status") == "ok" else 0)
             + (2 if row.get("selection_source") == "dataset_url" else 0),
         )
@@ -893,7 +906,7 @@ def build_trust_reviews(
             + website_signal_score
             + resolution_signal_score
             + freshness_signal_score
-            + row.get("evidence_count", 0) * 1.5,
+            + evidence_count * 1.5,
         )
 
         if source == "fallback":
@@ -913,9 +926,9 @@ def build_trust_reviews(
             risk_flags.append(website_verification_status)
         if row.get("page_status") not in {"ok", "demo_safe", "", None}:
             risk_flags.append("website scrape incomplete")
-        if row.get("social_link_count", 0) == 0 and row.get("distinct_social_media_presence_count", 0) == 0:
+        if social_link_count == 0 and distinct_social_count == 0:
             risk_flags.append("social proof is sparse")
-        if row.get("evidence_count", 0) < 3:
+        if evidence_count < 3:
             risk_flags.append("dataset evidence is sparse")
 
         rows.append(
@@ -924,8 +937,8 @@ def build_trust_reviews(
                 "facility_id": row.get("facility_id", ""),
                 "facility_name": row.get("facility_name", ""),
                 "canonical_name": row.get("canonical_name", ""),
-                "entity_record_count": int(row.get("entity_record_count", 1) or 1),
-                "entity_match_confidence": float(row.get("entity_match_confidence", 0) or 0),
+                "entity_record_count": entity_record_count,
+                "entity_match_confidence": float(entity_match_confidence),
                 "entity_match_reasons": _safe_text(row.get("entity_match_reasons")),
                 "duplicate_review_required": bool(row.get("duplicate_review_required", False)),
                 "search_query": _safe_text(row.get("search_query")),
@@ -934,10 +947,10 @@ def build_trust_reviews(
                 "primary_url": _safe_text(row.get("primary_url") or row.get("result_url")),
                 "primary_domain": _safe_text(row.get("primary_domain") or row.get("result_domain")),
                 "website_excerpt": _safe_text(row.get("website_excerpt"))[:280],
-                "social_link_count": int(row.get("social_link_count", 0) or 0),
-                "contact_signal_count": int(row.get("contact_signal_count", 0) or 0),
-                "capability_mentions": int(row.get("capability_mentions", 0) or 0),
-                "name_match_score": float(row.get("name_match_score", 0) or 0),
+                "social_link_count": social_link_count,
+                "contact_signal_count": contact_signal_count,
+                "capability_mentions": capability_mentions,
+                "name_match_score": float(name_match_score),
                 "dataset_social_score": round(dataset_social_score, 1),
                 "website_signal_score": round(website_signal_score, 1),
                 "resolution_signal_score": round(resolution_signal_score, 1),
