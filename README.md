@@ -18,7 +18,7 @@ Care Convoy is a Databricks Apps MVP for the Virtue Foundation hackathon. The ap
 - The repo now includes a Databricks Asset Bundle in [databricks.yml](databricks.yml) and [resources/care_convoy_app.app.yml](resources/care_convoy_app.app.yml).
 - The app resource declares native dependencies on Lakebase, the SQL warehouse, and the serving endpoint.
 - The existing `care-convoy` app is now bound to the bundle resource `care_convoy_app`.
-- [app.yaml](app.yaml) explicitly starts Streamlit on port `8080`, address `0.0.0.0`, and headless mode for Databricks Apps.
+- [app.yaml](app.yaml) lets Databricks Apps provide the Streamlit serving port; do not hard-code `8080`, because the browser availability gate catches the resulting proxy failure.
 - Preferred deploy flow:
   1. `databricks bundle validate --strict --profile "databricks-profile"`
   2. `DATABRICKS_AUTH_VALUE="$(databricks auth token --profile "databricks-profile" | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')" DATABRICKS_TF_EXEC_PATH=terraform databricks bundle deploy -t dev --profile "databricks-profile"`
@@ -73,6 +73,7 @@ Latest smoke test:
 - Syntax gate: `python3 -m compileall src` passed.
 - Dependency audit: `python3 -m pip_audit -r requirements.txt` returned `No known vulnerabilities found`.
 - Live agent smoke returned all six board agents with supervisor verdict `shortlist after review`, confidence `Moderate Confidence`, and `tradeoff_chart_built=True`.
+- Browser availability check loaded the public Databricks App URL and rendered the Care Convoy Streamlit UI instead of `App Not Available` or `502 Bad Gateway`.
 - Lakebase read-after-write smoke through the app persistence layer returned a v3 validation shortlist row with board verdict, board confidence, facility name, and agent metadata.
 - Remaining human gate: complete an authenticated hosted-app click-through for Review Board, Trust Evidence, shortlist save, refresh, and readback before making final demo-ready claims.
 
