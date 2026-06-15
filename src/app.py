@@ -352,6 +352,29 @@ def _show_shortlist(result: dict[str, Any]) -> None:
             st.error("Could not save the shortlist item. Lakebase permissions or configuration need attention.")
 
 
+def _stage_selector() -> str:
+    segmented = getattr(st, "segmented_control", None)
+    if callable(segmented):
+        selected = segmented(
+            "Workspace View",
+            STAGE_VIEWS,
+            default="Overview",
+            selection_mode="single",
+            label_visibility="collapsed",
+            key="stage_view",
+        )
+        return selected or "Overview"
+
+    return st.radio(
+        "Workspace View",
+        STAGE_VIEWS,
+        index=0,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="stage_view_radio",
+    )
+
+
 @st.fragment
 def _render_stage(view: str, result: dict[str, Any]) -> None:
     if view == "Overview":
@@ -403,14 +426,6 @@ _summary_metrics(result)
 if result is None:
     _show_empty_state()
 else:
-    stage_view = st.segmented_control(
-        "Workspace View",
-        STAGE_VIEWS,
-        default="Overview",
-        selection_mode="single",
-        label_visibility="collapsed",
-        key="stage_view",
-    )
-    _render_stage(stage_view or "Overview", result)
+    _render_stage(_stage_selector(), result)
 
 st.markdown("</div>", unsafe_allow_html=True)

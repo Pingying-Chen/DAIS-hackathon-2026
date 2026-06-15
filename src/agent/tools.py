@@ -1033,15 +1033,15 @@ def _build_facility_review_frame(
     if filtered.empty:
         filtered = final.copy()
 
-    entity_ids = filtered["resolved_entity_id"].dropna().unique().tolist()
-    filtered_reviews = trust_reviews[trust_reviews["resolved_entity_id"].isin(entity_ids)].copy()
-    filtered_search = search_results[search_results["resolved_entity_id"].isin(entity_ids)].copy()
-    filtered_signals = website_signals[website_signals["resolved_entity_id"].isin(entity_ids)].copy()
     filtered = (
         filtered.sort_values(["urgency_support", "trust_score", "capability_fit"], ascending=False)
         .drop_duplicates("resolved_entity_id")
         .head(12)
     )
+    entity_ids = filtered["resolved_entity_id"].dropna().unique().tolist()
+    filtered_reviews = trust_reviews[trust_reviews["resolved_entity_id"].isin(entity_ids)].copy()
+    filtered_search = search_results[search_results["resolved_entity_id"].isin(entity_ids)].copy()
+    filtered_signals = website_signals[website_signals["resolved_entity_id"].isin(entity_ids)].copy()
     return _attach_artifacts(filtered, source, filtered_reviews, filtered_search, filtered_signals)
 
 
