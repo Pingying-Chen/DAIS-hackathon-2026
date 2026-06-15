@@ -439,7 +439,6 @@ def _render_stage(view: str, result: dict[str, Any]) -> None:
 st.set_page_config(page_title="Care Convoy", layout="wide")
 inject_theme()
 
-st.markdown("<div class='db-shell'>", unsafe_allow_html=True)
 _hero()
 
 with st.sidebar:
@@ -474,5 +473,3 @@ if result is None:
     _show_empty_state()
 else:
     _render_stage(_stage_selector(), result)
-
-st.markdown("</div>", unsafe_allow_html=True)

@@ -19,15 +19,15 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 [data-testid="stAppViewContainer"] > .main {
-  height: 100vh;
-  height: 100dvh;
-  overflow: hidden;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 [data-testid="stMainBlockContainer"] {
   max-width: 100%;
-  padding: 16px 16px 8px 16px;
-  height: 100%;
+  padding: 16px 16px 24px 16px;
 }
 
 [data-testid="stSidebar"] {
@@ -37,14 +37,6 @@ html, body, [data-testid="stAppViewContainer"] {
 
 [data-testid="stSidebar"] * {
   font-family: var(--db-font);
-}
-
-.db-shell {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: calc(100vh - 24px);
-  min-height: calc(100dvh - 24px);
 }
 
 .db-hero {
@@ -377,10 +369,6 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 @media (max-width: 720px) {
-  [data-testid="stAppViewContainer"] > .main {
-    overflow-y: auto;
-  }
-
   [data-testid="stMainBlockContainer"] {
     padding: 14px;
   }
