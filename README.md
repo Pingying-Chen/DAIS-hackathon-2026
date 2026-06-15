@@ -1,6 +1,6 @@
 # Care Convoy
 
-Care Convoy is a Databricks Apps MVP for the Virtue Foundation hackathon. The app helps an operations lead decide where to send the next specialty medical team in India using evidence-backed facility data, district need signals, visible uncertainty, a facility Trust Desk v2 workflow, and a persistent shortlist workflow.
+Care Convoy is a Databricks Apps MVP for the Virtue Foundation hackathon. The app helps an operations lead decide where to send the next specialty medical team in India using evidence-backed facility data, district need signals, visible uncertainty, a multi-agent Convoy Review Board v3 workflow, and a persistent shortlist workflow.
 
 ## Runtime Notes
 
@@ -20,20 +20,22 @@ Care Convoy is a Databricks Apps MVP for the Virtue Foundation hackathon. The ap
 - The existing `care-convoy` app is now bound to the bundle resource `care_convoy_app`.
 - Preferred deploy flow:
   1. `databricks bundle validate --strict --profile "databricks-profile"`
-  2. `DATABRICKS_TF_EXEC_PATH=terraform databricks bundle deploy -t dev --profile "databricks-profile"`
-  3. `DATABRICKS_TF_EXEC_PATH=terraform databricks bundle run care_convoy_app -t dev --profile "databricks-profile"`
+  2. `DATABRICKS_AUTH_VALUE="$(databricks auth token --profile "databricks-profile" | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')" DATABRICKS_TF_EXEC_PATH=terraform databricks bundle deploy -t dev --profile "databricks-profile"`
+  3. `DATABRICKS_AUTH_VALUE="$(databricks auth token --profile "databricks-profile" | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')" DATABRICKS_TF_EXEC_PATH=terraform databricks bundle run care_convoy_app -t dev --profile "databricks-profile"`
   4. `databricks apps get care-convoy --profile "databricks-profile"`
   5. verify app ACLs and Unity Catalog grants if the app is healthy but still unavailable
 
 Current deployed app URL:
 
 - [care-convoy](https://your-databricks-app-url)
+- Latest verified deployment: `<deployment-id>`, `RUNNING` and `ACTIVE` on 2026-06-15.
 
 ## Version History
 
 - `v2.0` - Added the Trust Desk v2 workflow with facility cleaning, entity resolution, public-website verification, and trust-supported referral planning. Reference commit: `538cf01`.
 - `v2.1` - Introduced the redesigned stage-based UI, canonical entity ranking improvements, KPI fixes, and safer trust-review handling for missing website signals. Reference commits: `6581107`, `88ec866`, `39a0932`, `738903d`.
 - `v2.2` - Reframed the app as a referral copilot with trust-backed stage views and fixed the clipped results layout that could hide post-run output in the live app. Reference commits: `a84c278`, `988e99d`.
+- `v3.0` - Added Convoy Review Board v3, a six-agent decision layer that reviews district need, facility fit, Trust Desk v2 evidence, citation safety, and supervisor approval before shortlist persistence.
 
 ## Native Design Baseline
 
@@ -53,6 +55,21 @@ Current deployed app URL:
 - Near-duplicate rows are resolved into canonical facility entities using deterministic matching on name, city, state, domain, and coordinate hints.
 - Facility trust combines dataset social signals with website corroboration from either dataset URLs or a public-search fallback.
 - The app surfaces website verification status and review-required cases instead of presenting all trust scores as equally certain.
+
+## Convoy Review Board v3
+
+- `Need Scout` checks the district need and uncertainty context.
+- `Facility Scout` evaluates the lead facility's capability fit and referral readiness.
+- `Trust Verifier` reuses Trust Desk v2 entity resolution, website verification, and trust scoring.
+- `Evidence Auditor` blocks claim-safe language when citations are missing or source URLs are blank.
+- `Referral Strategist` combines need, capability, trust, and evidence into a recommended action state.
+- `Supervisor` produces the final board verdict and stores board summary, verdict, confidence, and agent names in shortlist metadata.
+
+Latest smoke test:
+
+- Local deterministic tests: `pytest tests/ -q` returned `16 passed`.
+- Syntax gate: `python3 -m compileall src` passed.
+- Live agent smoke returned all six board agents with supervisor verdict `shortlist after review`, confidence `Moderate Confidence`, and `tradeoff_chart_built=True`.
 
 ## What stays local-only
 

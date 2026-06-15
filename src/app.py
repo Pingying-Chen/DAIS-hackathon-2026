@@ -32,7 +32,7 @@ CONFIDENCE_OPTIONS = {
     "High Confidence": 0.75,
 }
 
-STAGE_VIEWS = ["Overview", "Anchor Review", "Trust Evidence", "Shortlist"]
+STAGE_VIEWS = ["Overview", "Review Board", "Anchor Review", "Trust Evidence", "Shortlist"]
 
 
 def _format_metric(value: float | int | None) -> str:
@@ -77,6 +77,7 @@ def _summary_metrics(result: dict[str, Any] | None) -> None:
             verified_count = int(trust_reviews["website_verification_status"].eq("verified").sum())
         items = [
             {"label": "Referral Confidence", "value": result["confidence_label"], "value_class": "db-kpi-accent", "note": "Confidence in the lead referral anchor after trust scoring."},
+            {"label": "Board Agents", "value": str(len(result.get("review_board", []))), "note": "Review Board v3 agents checking need, fit, trust, and evidence."},
             {"label": "Priority Districts", "value": str(len(result["districts"])), "note": "Districts returned for the current mission."},
             {"label": "Candidate Facilities", "value": str(len(result["facilities"])), "note": "Resolved facilities ranked for referral action."},
             {"label": "Verified Websites", "value": str(verified_count), "note": "Facility websites corroborated by the trust support layer."},
@@ -151,6 +152,8 @@ def _show_overview(result: dict[str, Any]) -> None:
                 ),
                 top_facility["risk_flags"] or "No facility review flags.",
             )
+        if result.get("board_summary"):
+            card("Convoy Review Board v3", result["board_summary"], "Six specialized agents review the recommendation before it becomes a shortlist action.")
         if top_district is not None:
             card(
                 f"Highest-need district context: {top_district['district']}, {top_district['state']}",
@@ -164,12 +167,58 @@ def _show_overview(result: dict[str, Any]) -> None:
             "What to do next",
             "Use the other views to decide whether this facility is the right anchor for the referral plan.",
             [
+                "Open Review Board to see each agent verdict and the supervisor recommendation.",
                 "Open Anchor Review to inspect merged entities and compare the top facility candidates.",
                 "Open Trust Evidence to see website corroboration, duplicate checks, and citations.",
                 "Save the shortlist entry only after the trust signals support the referral recommendation.",
             ],
         )
         status_stack(_result_status_messages(result))
+
+
+def _show_review_board(result: dict[str, Any]) -> None:
+    board = result.get("review_board", [])
+    if not board:
+        st.info("Review Board v3 appears once a referral plan has been built.")
+        return
+
+    board_frame = pd.DataFrame(board)
+    left, right = st.columns([1.15, 0.85], gap="large")
+    with left:
+        st.dataframe(
+            board_frame[["agent", "verdict", "confidence", "evidence"]],
+            use_container_width=True,
+            hide_index=True,
+            height=300,
+        )
+        cards = [
+            {
+                "title": row["agent"],
+                "body": f"{row['role']} Verdict: {row['verdict']}.",
+                "caption": row["handoff"],
+            }
+            for row in board[:4]
+        ]
+        card_grid(cards)
+
+    with right:
+        supervisor = board[-1]
+        card(
+            "Supervisor packet",
+            result.get("board_summary", "The board has not produced a final packet yet."),
+            f"Final confidence: {supervisor['confidence']}",
+        )
+        action_panel(
+            "How v3 decides",
+            "The review board separates the placement decision into specialized checks before the app asks the operator to save a plan.",
+            [
+                "Need Scout validates district demand.",
+                "Facility Scout checks operational capability fit.",
+                "Trust Verifier reuses Trust Desk v2 entity and website scoring.",
+                "Evidence Auditor blocks unsupported claims.",
+                "Referral Strategist and Supervisor turn the checks into an action state.",
+            ],
+        )
 
 
 def _show_anchors(result: dict[str, Any]) -> None:
@@ -359,6 +408,8 @@ def _show_shortlist(result: dict[str, Any]) -> None:
 
         candidate = top_facility.iloc[0]
         district = top_district.iloc[0]
+        board_agents = result.get("review_board", [])
+        supervisor = board_agents[-1] if board_agents else {}
         default_note = f"Review {candidate['name']} for {district['district']} as the first referral anchor."
         card(
             "Ready to save",
@@ -371,7 +422,10 @@ def _show_shortlist(result: dict[str, Any]) -> None:
 
         with st.form("save_shortlist"):
             note = st.text_area("Verification note", value=default_note, height=110)
-            decision = st.selectbox("Decision status", ["needs verification", "approved", "hold"])
+            decision_options = ["needs verification", "approved", "hold"]
+            if supervisor.get("verdict") == "hold for evidence" or supervisor.get("confidence") == "Weak Evidence":
+                decision_options = ["needs verification", "hold"]
+            decision = st.selectbox("Decision status", decision_options)
             submitted = st.form_submit_button("Save shortlist item")
 
         if submitted:
@@ -383,6 +437,10 @@ def _show_shortlist(result: dict[str, Any]) -> None:
                 "confidence_label": candidate["confidence_label"],
                 "resolved_entity_id": candidate["resolved_entity_id"],
                 "website_verification_status": candidate["website_verification_status"],
+                "board_summary": result.get("board_summary", ""),
+                "board_verdict": supervisor.get("verdict", ""),
+                "board_confidence": supervisor.get("confidence", ""),
+                "board_agents": [agent["agent"] for agent in board_agents],
             }
             from src.agent.tools import save_user_decision
 
@@ -428,6 +486,8 @@ def _stage_selector() -> str:
 def _render_stage(view: str, result: dict[str, Any]) -> None:
     if view == "Overview":
         _show_overview(result)
+    elif view == "Review Board":
+        _show_review_board(result)
     elif view == "Anchor Review":
         _show_anchors(result)
     elif view == "Trust Evidence":

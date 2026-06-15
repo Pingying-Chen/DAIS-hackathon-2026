@@ -42,12 +42,18 @@ def _apply_chart_theme(chart: Figure) -> Figure:
     return chart
 
 
+def _chart_frame(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    chart_df = df[columns].copy()
+    chart_df.attrs = {}
+    return chart_df
+
+
 def build_confidence_chart(df: pd.DataFrame, label_column: str, value_column: str) -> Figure | None:
     if df.empty or label_column not in df or value_column not in df:
         return None
 
     theme = tokens()
-    chart_df = df[[label_column, value_column]].head(8).copy()
+    chart_df = _chart_frame(df, [label_column, value_column]).head(8)
     chart = px.bar(
         chart_df,
         x=value_column,
@@ -70,7 +76,7 @@ def build_tradeoff_chart(df: pd.DataFrame) -> Figure | None:
         return None
 
     theme = tokens()
-    chart_df = df[["name", "urgency_support", "capability_fit", "trust_score"]].copy()
+    chart_df = _chart_frame(df, ["name", "urgency_support", "capability_fit", "trust_score"])
     long_df = chart_df.melt(id_vars="name", var_name="metric", value_name="score")
     chart = px.bar(
         long_df,
