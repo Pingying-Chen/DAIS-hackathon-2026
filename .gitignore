@@ -1,0 +1,75 @@
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+dist/
+build/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# ── Secrets — never commit these ─────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.json
+databricks-token.txt
+
+# ── Databricks local artifacts ────────────────────────────────────────────────
+.databricks/
+bundle.lock
+*.ipynb_checkpoints/
+.agents/
+.codex/
+AGENTS.md
+templates/
+scripts/reconfigure.py
+scripts/audit-agent-kit.py
+scripts/check-design-conformance.py
+scripts/check-hackathon-loop.py
+
+# ── Video/media (upload to YouTube instead — Rule 4.3e) ──────────────────────
+*.webm
+*.mp4
+*.mov
+*.avi
+
+# ── Node / Playwright ─────────────────────────────────────────────────────────
+node_modules/
+package-lock.json
+screenshots/
+
+# ── OS / IDE ──────────────────────────────────────────────────────────────────
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+
+# ── Local reference PDFs (not part of the project source) ────────────────────
+*.pdf
+
+# ── Local planning/reference docs ─────────────────────────────────────────────
+ref/
+SPEC.md
+spec.md
+PLAN.md
+DEVELOPMENT-LOOP.md
+DESIGN-CONFORMANCE.md
+TESTING.md
+
+# ── Local MVP review artifacts ────────────────────────────────────────────────
+review/
+recordings/
+captures/
+exports/
+tmp/
