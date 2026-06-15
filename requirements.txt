@@ -3,6 +3,7 @@
 streamlit==1.38.0
 pandas>=2.2.2
 plotly>=5.22.0
+pydeck>=0.9.0
 folium>=0.17.0
 psycopg2-binary>=2.9.9
 databricks-sdk>=0.55.0

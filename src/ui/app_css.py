@@ -7,6 +7,7 @@ html, body, [data-testid="stAppViewContainer"] {
   background: var(--db-bg);
   color: var(--db-text);
   font-family: var(--db-font);
+  height: 100%;
 }
 
 [data-testid="stHeader"] {
@@ -18,12 +19,15 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 [data-testid="stAppViewContainer"] > .main {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 [data-testid="stMainBlockContainer"] {
   max-width: 100%;
-  padding: 20px 20px 12px 20px;
+  padding: 16px 16px 8px 16px;
+  height: 100%;
 }
 
 [data-testid="stSidebar"] {
@@ -38,7 +42,9 @@ html, body, [data-testid="stAppViewContainer"] {
 .db-shell {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
+  min-height: calc(100vh - 24px);
+  min-height: calc(100dvh - 24px);
 }
 
 .db-hero {
@@ -110,6 +116,13 @@ html, body, [data-testid="stAppViewContainer"] {
   gap: 12px;
 }
 
+.db-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(var(--db-cols, 2), minmax(0, 1fr));
+  align-items: stretch;
+}
+
 .db-kpi-card, .db-card {
   background: var(--db-surface);
   border: 1px solid var(--db-outline);
@@ -152,7 +165,7 @@ html, body, [data-testid="stAppViewContainer"] {
 .db-stage {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .db-split {
@@ -160,6 +173,13 @@ html, body, [data-testid="stAppViewContainer"] {
   grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.95fr);
   gap: 14px;
   align-items: stretch;
+}
+
+.db-view-note {
+  margin: 0;
+  color: var(--db-muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .db-card {
@@ -225,6 +245,38 @@ html, body, [data-testid="stAppViewContainer"] {
   gap: 8px;
 }
 
+.db-action-panel {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--db-surface) 88%, white), color-mix(in srgb, var(--db-surface-hi) 94%, white));
+}
+
+.db-action-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.db-action-step {
+  padding: 10px 12px;
+  border-radius: var(--db-radius);
+  border: 1px solid color-mix(in srgb, var(--db-outline) 90%, white);
+  background: color-mix(in srgb, var(--db-surface-hi) 78%, white);
+  color: var(--db-text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.db-grid-card {
+  height: 100%;
+}
+
+.db-map-caption {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--db-muted);
+}
+
 .db-status {
   border-left: 4px solid var(--db-warn);
   border-radius: var(--db-radius);
@@ -241,9 +293,23 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 .db-scroll-panel {
-  max-height: 440px;
+  max-height: 420px;
   overflow-y: auto;
   padding-right: 4px;
+}
+
+[data-testid="stDataFrame"] {
+  border: 1px solid var(--db-outline);
+  border-radius: var(--db-radius-lg);
+  overflow: hidden;
+}
+
+[data-testid="stDeckGlJsonChart"] {
+  min-height: 430px;
+}
+
+[data-testid="stDeckGlJsonChart"] iframe {
+  min-height: 430px;
 }
 
 [data-testid="stButtonGroup"] button,
@@ -284,11 +350,6 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 [data-testid="stDataFrame"] {
-  border: 1px solid var(--db-outline);
-  border-radius: var(--db-radius-lg);
-  overflow: hidden;
-}
-
 [data-testid="stExpander"] details,
 [data-testid="stStatusWidget"] {
   border-radius: var(--db-radius);
@@ -302,7 +363,7 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 @media (max-width: 1100px) {
-  .db-kpis, .db-inline-metrics {
+  .db-kpis, .db-inline-metrics, .db-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -316,13 +377,16 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 @media (max-width: 720px) {
+  [data-testid="stAppViewContainer"] > .main {
+    overflow-y: auto;
+  }
+
   [data-testid="stMainBlockContainer"] {
     padding: 14px;
   }
 
-  .db-kpis {
+  .db-kpis, .db-grid {
     grid-template-columns: 1fr;
   }
 }
 """
-

@@ -14,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.agent.reasoning import run_agent
 from src.db.lakebase import lakebase_available, lakebase_status, list_user_decisions
-from src.ui.components import card, hero_header, inline_metrics, kpi_row, status_stack
+from src.ui.components import action_panel, card, card_grid, hero_header, inline_metrics, kpi_row, status_stack
 from src.ui.theme import inject_theme
 from src.viz.charts import build_confidence_chart, build_tradeoff_chart
 from src.viz.maps import render_map
@@ -32,7 +32,7 @@ CONFIDENCE_OPTIONS = {
     "High Confidence": 0.75,
 }
 
-STAGE_VIEWS = ["Overview", "Anchors", "Trust Desk", "Shortlist"]
+STAGE_VIEWS = ["Overview", "Anchor Review", "Trust Evidence", "Shortlist"]
 
 
 def _format_metric(value: float | int | None) -> str:
@@ -48,15 +48,16 @@ def _hero() -> None:
         eyebrow="Track 3 Referral Copilot",
         title="Care Convoy",
         subtitle=(
-            "A Databricks-native mission planner for India that combines district need, "
-            "facility capability, and Trust Desk v2 verification so an operations lead "
-            "can choose a credible deployment anchor without reading raw rows."
+            "A Databricks-native referral copilot for India that combines district need, facility capability, "
+            "and a trust-scoring support layer so an operations lead can choose a credible deployment anchor "
+            "without reading raw rows."
         ),
         chips=[
             ("User", "Virtue Foundation operations lead"),
+            ("Decision", "Where to send the next referral team"),
             ("Trust layer", "Entity resolution + website corroboration"),
             ("Persistence", "Lakebase shortlist"),
-            ("Evidence model", "Citations and uncertainty visible"),
+            ("Evidence", "Citations and uncertainty visible"),
         ],
     )
 
@@ -64,43 +65,46 @@ def _hero() -> None:
 def _summary_metrics(result: dict[str, Any] | None) -> None:
     if result is None:
         items = [
-            {"label": "App State", "value": "Ready", "value_class": "db-kpi-accent", "note": "Choose a mission to run the v2 flow."},
-            {"label": "Track", "value": "3 + 2", "note": "Referral Copilot with Trust Desk v2."},
-            {"label": "Data Path", "value": "Live SQL", "note": "Unity Catalog facilities and district indicators."},
+            {"label": "App State", "value": "Ready", "value_class": "db-kpi-accent", "note": "Choose a care need and build the referral plan."},
+            {"label": "Track", "value": "3", "note": "Referral Copilot with a supporting trust layer."},
+            {"label": "Data Path", "value": "India Facilities", "note": "Unity Catalog facilities plus district context."},
             {"label": "Persistence", "value": "Lakebase", "note": "Saved shortlist decisions survive refresh."},
         ]
     else:
         trust_reviews = result.get("trust_reviews")
+        verified_count = 0
+        if trust_reviews is not None and not trust_reviews.empty:
+            verified_count = int(trust_reviews["website_verification_status"].eq("verified").sum())
         items = [
-            {"label": "Confidence", "value": result["confidence_label"], "value_class": "db-kpi-accent", "note": "Top anchor confidence after trust scoring."},
+            {"label": "Referral Confidence", "value": result["confidence_label"], "value_class": "db-kpi-accent", "note": "Confidence in the lead referral anchor after trust scoring."},
             {"label": "Priority Districts", "value": str(len(result["districts"])), "note": "Districts returned for the current mission."},
-            {"label": "Anchor Entities", "value": str(len(result["facilities"])), "note": "Resolved facilities ranked for action."},
-            {"label": "Trust Reviews", "value": str(len(trust_reviews) if trust_reviews is not None else 0), "note": "Entities with website verification status."},
+            {"label": "Candidate Facilities", "value": str(len(result["facilities"])), "note": "Resolved facilities ranked for referral action."},
+            {"label": "Verified Websites", "value": str(verified_count), "note": "Facility websites corroborated by the trust support layer."},
         ]
     kpi_row(items)
 
 
 def _show_empty_state() -> None:
-    left, right = st.columns([1.4, 1], gap="large")
-    with left:
-        card(
-            "How the v2 flow works",
-            (
-                "Run a mission, inspect the map and anchor shortlist, then switch to Trust Desk "
-                "to see whether similar rows were merged and whether the selected website "
-                "corroborates the facility claims."
-            ),
-            "The public app should tell the track, trust method, and persistence story before any code talk.",
-        )
-    with right:
-        card(
-            "Current deploy goal",
-            (
-                "This build is being aligned to the design-system skills so the UI becomes the live "
-                "presentation surface rather than a plain scaffold."
-            ),
-            "Start from the sidebar to generate the first mission plan.",
-        )
+    card_grid(
+        [
+            {
+                "title": "What this app helps you decide",
+                "body": (
+                    "Run the referral copilot, inspect the district map and facility shortlist, then use the trust layer "
+                    "to verify whether the recommended anchor looks credible enough to act on."
+                ),
+                "caption": "The opening screen should make the review decision obvious before any technical detail appears.",
+            },
+            {
+                "title": "What to click first",
+                "body": (
+                    "Choose a care need, keep or tighten the state and district filters, then click Build Referral Plan "
+                    "to generate a shortlist with trust-backed evidence."
+                ),
+                "caption": "Results stay inside the main workspace views so the sidebar remains input-only.",
+            },
+        ]
+    )
 
 
 def _result_status_messages(result: dict[str, Any]) -> list[tuple[str, str]]:
@@ -112,85 +116,103 @@ def _result_status_messages(result: dict[str, Any]) -> list[tuple[str, str]]:
 def _show_overview(result: dict[str, Any]) -> None:
     districts = result["districts"]
     facilities = result["facilities"]
+    trust_reviews = result["trust_reviews"]
     top_district = districts.iloc[0] if not districts.empty else None
     top_facility = facilities.iloc[0] if not facilities.empty else None
+    top_trust_review = trust_reviews.iloc[0] if trust_reviews is not None and not trust_reviews.empty else None
 
-    left, right = st.columns([1.55, 1], gap="large")
+    left, right = st.columns([1.6, 1], gap="large")
     with left:
-        st.subheader("Planning Map")
-        render_map(districts, facilities)
-        if top_district is not None:
-            card(
-                f"Priority district: {top_district['district']}, {top_district['state']}",
-                (
-                    f"Need score {top_district['need_score']:.1f}, coverage gap {top_district['coverage_gap']:.1f}, "
-                    f"evidence score {top_district['evidence_score']:.1f}. "
-                    f"Uncertainty label: {top_district['uncertainty_label']}."
-                ),
-                top_district["risk_flags"] or "No district risk flags.",
-            )
+        render_map(districts, facilities, height=430)
+        st.markdown(
+            "<p class='db-map-caption'>Blue points show district demand context. Red points show the facilities being reviewed for credibility.</p>",
+            unsafe_allow_html=True,
+        )
 
     with right:
-        card("Mission Brief", result["summary"], result["provenance"])
+        card("What this run says", result["summary"], result["provenance"])
         inline_metrics(
             [
-                ("Selected mission", result["mission_label"]),
-                ("Top confidence", result["confidence_label"]),
+                ("Care need", result["mission_label"]),
+                ("Referral confidence", result["confidence_label"]),
                 ("Shortlist mode", "Lakebase" if lakebase_available() else "Not configured"),
                 (
-                    "Top website status",
-                    str(top_facility["website_verification_status"]) if top_facility is not None else "n/a",
+                    "Lead website status",
+                    str(top_trust_review["website_verification_status"]) if top_trust_review is not None else "n/a",
                 ),
             ]
         )
         if top_facility is not None:
             card(
-                f"Top anchor: {top_facility['name']}",
+                f"Lead referral anchor: {top_facility['name']}",
                 (
                     f"Capability fit {top_facility['capability_fit']:.0f}, trust score {top_facility['trust_score']:.0f}, "
-                    f"resolved entity {top_facility['resolved_entity_id']} with {int(top_facility['entity_record_count'])} source row(s)."
+                    f"resolved entity {top_facility['resolved_entity_id']} built from {int(top_facility['entity_record_count'])} source row(s)."
                 ),
                 top_facility["risk_flags"] or "No facility review flags.",
             )
+        if top_district is not None:
+            card(
+                f"Highest-need district context: {top_district['district']}, {top_district['state']}",
+                (
+                    f"Need score {top_district['need_score']:.1f}, coverage gap {top_district['coverage_gap']:.1f}, "
+                    f"evidence score {top_district['evidence_score']:.1f}."
+                ),
+                top_district["uncertainty_label"],
+            )
+        action_panel(
+            "What to do next",
+            "Use the other views to decide whether this facility is the right anchor for the referral plan.",
+            [
+                "Open Anchor Review to inspect merged entities and compare the top facility candidates.",
+                "Open Trust Evidence to see website corroboration, duplicate checks, and citations.",
+                "Save the shortlist entry only after the trust signals support the referral recommendation.",
+            ],
+        )
         status_stack(_result_status_messages(result))
 
 
-def _show_district_snapshot(result: dict[str, Any]) -> None:
+def _show_anchors(result: dict[str, Any]) -> None:
     districts = result["districts"]
-    if districts.empty:
-        st.info("No district priorities yet. Try broadening the state or district filter.")
-        return
-
-    st.subheader("District Priorities")
-    chart = build_confidence_chart(districts, "district", "priority_score")
-    if chart is not None:
-        st.plotly_chart(chart, use_container_width=True)
-
-    for row in districts.head(4).itertuples(index=False):
-        with st.container(border=True):
-            top_left, top_right = st.columns([3, 1])
-            with top_left:
-                st.markdown(f"**{row.district}, {row.state}**")
-                st.caption(row.uncertainty_label)
-            with top_right:
-                st.metric("Priority", f"{row.priority_score:.0f}")
-            metric_cols = st.columns(4)
-            metric_cols[0].metric("Need", _format_metric(row.need_score))
-            metric_cols[1].metric("Gap", _format_metric(row.coverage_gap))
-            metric_cols[2].metric("Facilities", _format_metric(row.facility_count))
-            metric_cols[3].metric("Evidence", _format_metric(row.evidence_score))
-            if row.risk_flags:
-                st.caption(f"Risk flags: {row.risk_flags}")
-
-
-def _show_facilities(result: dict[str, Any]) -> None:
     facilities = result["facilities"]
-    if facilities.empty:
-        st.info("No facility anchors yet. The fallback dataset will appear once a district is selected.")
+    if facilities.empty and districts.empty:
+        st.info("No facility entities are available yet. Try broadening the state or district filter.")
         return
 
-    st.subheader("Referral Anchors")
-    for row in facilities.head(6).itertuples(index=False):
+    left, right = st.columns([1.05, 1], gap="large")
+    with left:
+        if districts.empty:
+            st.info("District demand context is not available for this run.")
+        else:
+            chart = build_confidence_chart(districts, "district", "priority_score")
+            if chart is not None:
+                chart.update_layout(height=350, margin=dict(l=8, r=8, t=8, b=8))
+                st.plotly_chart(chart, use_container_width=True)
+
+    with right:
+        if facilities.empty:
+            st.info("No facility candidates are available yet. The fallback dataset will appear once a district is selected.")
+            return
+
+        cards: list[dict[str, str]] = []
+        for row in facilities.head(4).itertuples(index=False):
+            cards.append(
+                {
+                    "title": row.name,
+                    "body": (
+                        f"{row.address_city}, {row.address_stateOrRegion}. Trust {row.trust_score:.0f}, fit {row.capability_fit:.0f}, "
+                        f"website {row.website_verification_status}, entity rows {int(row.entity_record_count)}."
+                    ),
+                    "caption": row.risk_flags or row.confidence_label,
+                }
+            )
+        card_grid(cards)
+
+    if facilities.empty:
+        st.info("No facility candidates are available yet. The fallback dataset will appear once a district is selected.")
+        return
+
+    for row in facilities.head(4).itertuples(index=False):
         with st.expander(f"{row.name} ({row.address_city}, {row.address_stateOrRegion})", expanded=False):
             stats = st.columns(4)
             stats[0].metric("Fit", f"{row.capability_fit:.0f}")
@@ -218,19 +240,17 @@ def _show_facilities(result: dict[str, Any]) -> None:
                     hide_index=True,
                 )
 
-    st.divider()
     _show_compare(result)
 
 
 def _show_trust_desk(result: dict[str, Any]) -> None:
     trust_reviews = result["trust_reviews"]
     if trust_reviews is None or trust_reviews.empty:
-        st.info("Trust Desk v2 appears once facility candidates are available.")
+        st.info("Trust Evidence appears once facility candidates are available.")
         return
 
     left, right = st.columns([1.15, 0.85], gap="large")
     with left:
-        st.subheader("Trust Desk v2")
         st.dataframe(
             trust_reviews[
                 [
@@ -245,41 +265,60 @@ def _show_trust_desk(result: dict[str, Any]) -> None:
             ],
             use_container_width=True,
             hide_index=True,
+            height=300,
         )
 
-        for review in trust_reviews.head(3).itertuples(index=False):
-            with st.container(border=True):
-                detail_left, detail_right = st.columns([2, 1])
-                with detail_left:
-                    st.markdown(f"**{review.facility_name}**")
-                    st.caption(f"{review.website_verification_status} via {review.selection_source or 'unavailable'}")
-                    if review.primary_url:
-                        st.write(f"Matched website: {review.primary_url}")
-                    if review.website_excerpt:
-                        st.write(review.website_excerpt)
-                with detail_right:
-                    st.metric("Trust v2", f"{review.trust_score_v2:.0f}")
-                    st.metric("Entity Rows", review.entity_record_count)
-                    st.metric("Match", f"{review.entity_match_confidence:.2f}")
-                if review.entity_match_reasons:
-                    st.caption(f"Entity match logic: {review.entity_match_reasons}")
-                if review.risk_flags:
-                    st.caption(f"Review flags: {review.risk_flags}")
+        cards: list[dict[str, str]] = []
+        for review in trust_reviews.head(2).itertuples(index=False):
+            cards.append(
+                {
+                    "title": review.facility_name,
+                    "body": (
+                    f"Status {review.review_status}, website {review.website_verification_status}, "
+                    f"trust {review.trust_score_v2:.0f}, entity rows {review.entity_record_count}, "
+                    f"match confidence {review.entity_match_confidence:.2f}."
+                    ),
+                    "caption": review.risk_flags or review.entity_match_reasons or "No extra review notes.",
+                }
+            )
+        card_grid(cards)
 
     with right:
-        st.subheader("Evidence Ledger")
-        st.dataframe(result["citations"], use_container_width=True, hide_index=True)
+        card(
+            "How the trust support layer works",
+            (
+                "Each facility row is cleaned and merged into a resolved entity, then the app checks a selected public website and "
+                "combines those signals with the social-media features already present in the dataset."
+            ),
+            "The trust score supports the referral choice; it does not replace the referral decision itself.",
+        )
+        st.dataframe(result["citations"], use_container_width=True, hide_index=True, height=300)
+        search_results = result.get("search_results")
+        if search_results is not None and not search_results.empty:
+            st.dataframe(
+                search_results[
+                    [
+                        "facility_name",
+                        "selection_source",
+                        "result_domain",
+                        "match_confidence",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+                height=180,
+            )
 
 
 def _show_compare(result: dict[str, Any]) -> None:
     facilities = result["facilities"].head(2)
     if len(facilities) < 2:
-        st.info("Compare view unlocks when at least two candidate anchors are available.")
+        st.info("Compare view unlocks when at least two facility candidates are available.")
         return
 
-    st.subheader("Trade-off Compare")
     chart = build_tradeoff_chart(facilities)
     if chart is not None:
+        chart.update_layout(height=300, margin=dict(l=8, r=8, t=8, b=8))
         st.plotly_chart(chart, use_container_width=True)
 
     left, right = st.columns(2, gap="large")
@@ -297,66 +336,76 @@ def _show_compare(result: dict[str, Any]) -> None:
 
 
 def _show_shortlist(result: dict[str, Any]) -> None:
-    st.subheader("Mission Shortlist")
     saved = list_user_decisions(limit=8)
     saved_error = saved.attrs.get("error")
-    if saved_error:
-        st.warning(saved_error)
-    elif not saved.empty:
-        st.dataframe(saved, use_container_width=True, hide_index=True)
-    else:
-        card(
-            "No shortlist entries yet",
-            "Save the current top anchor after reviewing its trust status to create a persistent decision artifact.",
-            "The shortlist is the impact beat: it proves the run produced a durable action.",
-        )
-
     top_facility = result["facilities"].head(1)
     top_district = result["districts"].head(1)
-    if top_facility.empty or top_district.empty:
-        return
-
-    candidate = top_facility.iloc[0]
-    district = top_district.iloc[0]
-    default_note = f"Review {candidate['name']} for {district['district']} as the first convoy anchor."
-
-    with st.form("save_shortlist"):
-        note = st.text_area("Verification note", value=default_note, height=110)
-        decision = st.selectbox("Decision status", ["needs verification", "approved", "hold"])
-        submitted = st.form_submit_button("Save shortlist item")
-
-    if submitted:
-        run_id = result["run_id"]
-        payload = {
-            "district": district["district"],
-            "state": district["state"],
-            "facility_name": candidate["name"],
-            "confidence_label": candidate["confidence_label"],
-            "resolved_entity_id": candidate["resolved_entity_id"],
-            "website_verification_status": candidate["website_verification_status"],
-        }
-        from src.agent.tools import save_user_decision
-
-        saved_ok = save_user_decision(
-            run_id=run_id,
-            mission_type=result["mission_label"],
-            district=district["district"],
-            facility_id=str(candidate["unique_id"]),
-            decision=decision,
-            note=note,
-            metadata=payload,
-        )
-        if saved_ok:
-            st.success("Shortlist item saved.")
+    left, right = st.columns([1.1, 0.9], gap="large")
+    with left:
+        if saved_error:
+            st.warning(saved_error)
+        elif not saved.empty:
+            st.dataframe(saved, use_container_width=True, hide_index=True, height=310)
         else:
-            st.error("Could not save the shortlist item. Lakebase permissions or configuration need attention.")
+            card(
+                "No shortlist entries yet",
+                "Save the current lead facility after reviewing its trust status to create a durable decision record.",
+                "The shortlist is the impact beat: it proves the run produced a persistent action.",
+            )
+
+    with right:
+        if top_facility.empty or top_district.empty:
+            return
+
+        candidate = top_facility.iloc[0]
+        district = top_district.iloc[0]
+        default_note = f"Review {candidate['name']} for {district['district']} as the first referral anchor."
+        card(
+            "Ready to save",
+            (
+                f"{candidate['name']} is the current lead candidate for {district['district']}, {district['state']}. "
+                f"Save only after the trust evidence and duplicate-review flags look acceptable."
+            ),
+            candidate["risk_flags"] or "No extra risk flags on the lead candidate.",
+        )
+
+        with st.form("save_shortlist"):
+            note = st.text_area("Verification note", value=default_note, height=110)
+            decision = st.selectbox("Decision status", ["needs verification", "approved", "hold"])
+            submitted = st.form_submit_button("Save shortlist item")
+
+        if submitted:
+            run_id = result["run_id"]
+            payload = {
+                "district": district["district"],
+                "state": district["state"],
+                "facility_name": candidate["name"],
+                "confidence_label": candidate["confidence_label"],
+                "resolved_entity_id": candidate["resolved_entity_id"],
+                "website_verification_status": candidate["website_verification_status"],
+            }
+            from src.agent.tools import save_user_decision
+
+            saved_ok = save_user_decision(
+                run_id=run_id,
+                mission_type=result["mission_label"],
+                district=district["district"],
+                facility_id=str(candidate["unique_id"]),
+                decision=decision,
+                note=note,
+                metadata=payload,
+            )
+            if saved_ok:
+                st.success("Shortlist item saved.")
+            else:
+                st.error("Could not save the shortlist item. Lakebase permissions or configuration need attention.")
 
 
 def _stage_selector() -> str:
     segmented = getattr(st, "segmented_control", None)
     if callable(segmented):
         selected = segmented(
-            "Workspace View",
+            "Review View",
             STAGE_VIEWS,
             default="Overview",
             selection_mode="single",
@@ -366,7 +415,7 @@ def _stage_selector() -> str:
         return selected or "Overview"
 
     return st.radio(
-        "Workspace View",
+        "Review View",
         STAGE_VIEWS,
         index=0,
         horizontal=True,
@@ -379,11 +428,9 @@ def _stage_selector() -> str:
 def _render_stage(view: str, result: dict[str, Any]) -> None:
     if view == "Overview":
         _show_overview(result)
-        st.divider()
-        _show_district_snapshot(result)
-    elif view == "Anchors":
-        _show_facilities(result)
-    elif view == "Trust Desk":
+    elif view == "Anchor Review":
+        _show_anchors(result)
+    elif view == "Trust Evidence":
         _show_trust_desk(result)
     else:
         _show_shortlist(result)
@@ -397,20 +444,20 @@ _hero()
 
 with st.sidebar:
     st.subheader("Mission Setup")
-    mission_key = st.selectbox("Mission type", list(MISSION_OPTIONS), format_func=MISSION_OPTIONS.get)
-    state_filter = st.text_input("State filter", value="Maharashtra")
-    district_filter = st.text_input("District filter", value="")
-    confidence_label = st.select_slider("Minimum confidence", options=list(CONFIDENCE_OPTIONS))
-    run_button = st.button("Build Mission Plan", type="primary", use_container_width=True)
+    mission_key = st.selectbox("Care need", list(MISSION_OPTIONS), format_func=MISSION_OPTIONS.get)
+    state_filter = st.text_input("State focus", value="Maharashtra")
+    district_filter = st.text_input("District focus", value="")
+    confidence_label = st.select_slider("Minimum certainty", options=list(CONFIDENCE_OPTIONS))
+    run_button = st.button("Build Referral Plan", type="primary", use_container_width=True)
     lakebase = lakebase_status()
-    st.caption("Persistence mode: Lakebase" if lakebase_available() else "Persistence mode: Lakebase not configured yet")
+    st.caption("Shortlist mode: Lakebase" if lakebase_available() else "Shortlist mode: Lakebase not configured yet")
     st.caption(lakebase["detail"])
 
 if "latest_result" not in st.session_state:
     st.session_state.latest_result = None
 
 if run_button:
-    with st.spinner("Scoring district demand, anchor fit, and trust review..."):
+    with st.spinner("Resolving entities, checking websites, and scoring trust..."):
         st.session_state.latest_result = run_agent(
             mission_type=mission_key,
             mission_label=MISSION_OPTIONS[mission_key],

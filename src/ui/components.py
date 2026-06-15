@@ -52,6 +52,30 @@ def card(title: str, body: str, caption: str = "") -> None:
     )
 
 
+def card_grid(cards: list[dict[str, str]], columns: int = 2) -> None:
+    grid_cards: list[str] = []
+    for item in cards:
+        caption_html = (
+            f"<div class='db-card-caption'>{escape(item.get('caption', ''))}</div>"
+            if item.get("caption")
+            else ""
+        )
+        grid_cards.append(
+            (
+                f"<section class=\"db-card db-grid-card\">"
+                f"<div class=\"db-card-title\">{escape(item['title'])}</div>"
+                f"<p class=\"db-card-copy\">{escape(item['body'])}</p>"
+                f"{caption_html}"
+                f"</section>"
+            )
+        )
+
+    st.markdown(
+        f"<section class='db-grid' style='--db-cols:{columns}'>{''.join(grid_cards)}</section>",
+        unsafe_allow_html=True,
+    )
+
+
 def inline_metrics(items: list[tuple[str, str]]) -> None:
     metrics_html = "".join(
         (
@@ -72,3 +96,17 @@ def status_stack(messages: list[tuple[str, str]]) -> None:
         f"<div class='db-status {escape(tone)}'>{escape(message)}</div>" for tone, message in messages
     )
     st.markdown(f"<div class='db-status-stack'>{html}</div>", unsafe_allow_html=True)
+
+
+def action_panel(title: str, intro: str, steps: list[str]) -> None:
+    items = "".join(f"<div class='db-action-step'>{escape(step)}</div>" for step in steps)
+    st.markdown(
+        (
+            f"<section class='db-card db-action-panel'>"
+            f"<div class='db-card-title'>{escape(title)}</div>"
+            f"<p class='db-card-copy'>{escape(intro)}</p>"
+            f"<div class='db-action-steps'>{items}</div>"
+            f"</section>"
+        ),
+        unsafe_allow_html=True,
+    )
