@@ -29,6 +29,12 @@ Current deployed app URL:
 
 - [care-convoy](https://your-databricks-app-url)
 
+## Version History
+
+- `v2.0` - Added the Trust Desk v2 workflow with facility cleaning, entity resolution, public-website verification, and trust-supported referral planning. Reference commit: `538cf01`.
+- `v2.1` - Introduced the redesigned stage-based UI, canonical entity ranking improvements, KPI fixes, and safer trust-review handling for missing website signals. Reference commits: `6581107`, `88ec866`, `39a0932`, `738903d`.
+- `v2.2` - Reframed the app as a referral copilot with trust-backed stage views and fixed the clipped results layout that could hide post-run output in the live app. Reference commits: `a84c278`, `988e99d`.
+
 ## Native Design Baseline
 
 - [.streamlit/config.toml](.streamlit/config.toml) sets the native Streamlit light theme used by the deployed app.
