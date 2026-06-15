@@ -48,7 +48,7 @@ def _extract_result_url(raw_url: str) -> str:
     return raw_url.strip()
 
 
-def search_public_web(query: str, limit: int = 5, timeout_seconds: int = 8) -> pd.DataFrame:
+def search_public_web(query: str, limit: int = 5, timeout_seconds: int = 4) -> pd.DataFrame:
     if not query.strip():
         return _empty_search_frame()
 
@@ -93,7 +93,7 @@ def search_public_web(query: str, limit: int = 5, timeout_seconds: int = 8) -> p
     return pd.DataFrame(rows, columns=SEARCH_COLUMNS)
 
 
-def scrape_public_page(url: str, timeout_seconds: int = 8) -> dict[str, Any]:
+def scrape_public_page(url: str, timeout_seconds: int = 4) -> dict[str, Any]:
     if not url.strip():
         return dict(SCRAPE_DEFAULTS)
 

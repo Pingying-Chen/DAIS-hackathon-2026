@@ -14,6 +14,7 @@ def _facility_rows() -> pd.DataFrame:
                 "address_city": "Nagpur",
                 "address_stateOrRegion": "Maharashtra",
                 "address_zipOrPostcode": "440001",
+                "address_country": "India",
                 "specialties": "Maternal health",
                 "procedure": "Surgery",
                 "equipment": "NICU",
@@ -35,6 +36,7 @@ def _facility_rows() -> pd.DataFrame:
                 "address_city": "Nagpur",
                 "address_stateOrRegion": "Maharashtra",
                 "address_zipOrPostcode": "440001",
+                "address_country": "India",
                 "specialties": "Maternal health",
                 "procedure": "Surgery",
                 "equipment": "NICU",
@@ -56,6 +58,7 @@ def _facility_rows() -> pd.DataFrame:
                 "address_city": "Aurangabad",
                 "address_stateOrRegion": "Maharashtra",
                 "address_zipOrPostcode": "431001",
+                "address_country": "India",
                 "specialties": "General access",
                 "procedure": "",
                 "equipment": "Basic diagnostics",
@@ -209,3 +212,16 @@ def test_build_trust_reviews_prefers_high_signal_facility() -> None:
 
     assert sunrise_score > regional_score
     assert trust_reviews.loc[trust_reviews["facility_id"] == "facility-1", "website_verification_status"].iloc[0] == "verified"
+
+
+def test_build_facility_review_frame_returns_one_row_per_resolved_entity() -> None:
+    frame = tools._build_facility_review_frame(
+        _facility_rows().head(2),
+        source="fallback",
+        confidence_threshold=0.25,
+        allow_web_enrichment=False,
+    )
+
+    assert len(frame) == 1
+    assert frame.iloc[0]["resolved_entity_id"] == "entity-01"
+    assert int(frame.iloc[0]["entity_record_count"]) == 2

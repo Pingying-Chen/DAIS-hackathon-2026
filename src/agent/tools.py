@@ -31,6 +31,7 @@ FACILITY_TEXT_COLUMNS = [
     "address_city",
     "address_stateOrRegion",
     "address_zipOrPostcode",
+    "address_country",
     "specialties",
     "procedure",
     "equipment",
@@ -189,6 +190,11 @@ def _primary_domain(value: Any) -> str:
         if domain:
             return domain
     return ""
+
+
+def _in_india_scope(country: Any) -> bool:
+    country_text = _safe_text(country).lower()
+    return "india" in country_text
 
 
 def _parse_number(value: Any) -> float:
@@ -440,6 +446,7 @@ def _clean_facility_candidates(raw: pd.DataFrame) -> pd.DataFrame:
     df["normalized_name"] = df["name"].apply(_normalized_name)
     df["normalized_city"] = df["address_city"].apply(_location_key)
     df["normalized_state"] = df["address_stateOrRegion"].apply(_location_key)
+    df["country_in_scope"] = df["address_country"].apply(_in_india_scope)
     df["search_query"] = df.apply(
         lambda row: " ".join(
             part
@@ -619,7 +626,7 @@ def search_facility_sources(df: pd.DataFrame, limit: int = 3, allow_search: bool
     canonical = (
         df.sort_values(["urgency_support", "dataset_trust_score"], ascending=False)
         .drop_duplicates("resolved_entity_id")
-        .head(6)
+        .head(4)
     )
     rows: list[dict[str, Any]] = []
     for row in canonical.itertuples(index=False):
@@ -739,7 +746,7 @@ def collect_website_signals(
     canonical = (
         df.sort_values(["urgency_support", "dataset_trust_score"], ascending=False)
         .drop_duplicates("resolved_entity_id")
-        .head(6)
+        .head(4)
     )
     rows: list[dict[str, Any]] = []
     for row in canonical.itertuples(index=False):
@@ -1017,7 +1024,11 @@ def _build_facility_review_frame(
     filtered_reviews = trust_reviews[trust_reviews["resolved_entity_id"].isin(entity_ids)].copy()
     filtered_search = search_results[search_results["resolved_entity_id"].isin(entity_ids)].copy()
     filtered_signals = website_signals[website_signals["resolved_entity_id"].isin(entity_ids)].copy()
-    filtered = filtered.sort_values(["urgency_support", "trust_score", "capability_fit"], ascending=False).head(12)
+    filtered = (
+        filtered.sort_values(["urgency_support", "trust_score", "capability_fit"], ascending=False)
+        .drop_duplicates("resolved_entity_id")
+        .head(12)
+    )
     return _attach_artifacts(filtered, source, filtered_reviews, filtered_search, filtered_signals)
 
 
@@ -1048,6 +1059,7 @@ def get_facility_candidates(
       address_city,
       address_stateOrRegion,
       address_zipOrPostcode,
+      address_country,
       specialties,
       procedure,
       equipment,
@@ -1065,6 +1077,7 @@ def get_facility_candidates(
     from {CATALOG}.{SCHEMA}.facilities
     where {state_clause}
       and ({district_clause})
+      and coalesce(lower(address_country), '') like '%india%'
       and ({keyword_filter})
     limit 40
     """
@@ -1188,6 +1201,8 @@ def _facility_confidence_label(score: float) -> str:
 
 def _facility_risk_flags(row: pd.Series) -> str:
     flags: list[str] = []
+    if _non_empty_text(row.get("address_country")) and not bool(row.get("country_in_scope", True)):
+        flags.append("country scope needs review")
     if not row.get("source_urls"):
         flags.append("missing source url")
     if row.get("evidence_count", 0) < 3:
