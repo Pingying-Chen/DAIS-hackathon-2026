@@ -1,0 +1,40 @@
+bundle:
+  name: care-convoy
+
+include:
+  - resources/*.yml
+
+sync:
+  include:
+    - .env.example
+    - .gitignore
+    - .streamlit/**
+    - README.md
+    - app.yaml
+    - requirements.txt
+    - src/**/*.py
+    - theme.config.toml
+
+variables:
+  app_name:
+    default: care-convoy
+  app_description:
+    default: Care Convoy MVP for the Virtue Foundation DAIS 2026 hackathon
+  warehouse_id:
+    default: your-sql-warehouse-id
+  primary_llm_endpoint:
+    default: databricks-llama-4-maverick
+  postgres_branch:
+    default: projects/your-lakebase-project/branches/production
+  postgres_database:
+    default: projects/your-lakebase-project/branches/production/databases/databricks-postgres
+  workspace_user_name:
+    default: you@example.com
+
+targets:
+  dev:
+    default: true
+    mode: development
+    workspace:
+      host: https://your-databricks-workspace.cloud.databricks.com
+      profile: databricks-profile

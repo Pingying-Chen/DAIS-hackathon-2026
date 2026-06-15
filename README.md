@@ -1,6 +1,38 @@
 # Care Convoy
 
-Care Convoy is a Databricks Apps MVP for the Virtue Foundation hackathon. The app helps an operations lead decide where to send the next specialty medical team in India using evidence-backed facility data, district need signals, visible uncertainty, and a persistent shortlist workflow.
+Care Convoy is a Databricks Apps MVP for the Virtue Foundation hackathon. The app helps an operations lead decide where to send the next specialty medical team in India using evidence-backed facility data, district need signals, visible uncertainty, a facility Trust Desk v2 workflow, and a persistent shortlist workflow.
+
+## Runtime Notes
+
+- Live analytical reads come from the Virtue Foundation Unity Catalog tables configured in the Databricks workspace.
+- Persistent shortlist state uses Lakebase at `projects/your-lakebase-project/branches/production/endpoints/primary`.
+- Use [.env.example](.env.example) as the tracked reference for local Databricks and Lakebase wiring.
+- The Databricks App service principal also needs Unity Catalog grants for live reads:
+  - `USE CATALOG` on `databricks_virtue_foundation_dataset_dais_2026`
+  - `USE SCHEMA` on `databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset`
+  - `SELECT` on `facilities`, `nfhs_5_district_health_indicators`, and `india_post_pincode_directory`
+- Grant those privileges to the app application ID / service principal identifier, not just the display name, if Unity Catalog does not recognize the display name.
+
+## Native Databricks Deployment
+
+- The repo now includes a Databricks Asset Bundle in [databricks.yml](databricks.yml) and [resources/care_convoy_app.app.yml](resources/care_convoy_app.app.yml).
+- The app resource declares native dependencies on Lakebase, the SQL warehouse, and the serving endpoint.
+- The existing `care-convoy` app is now bound to the bundle resource `care_convoy_app`.
+- Preferred deploy flow:
+  1. `databricks bundle validate --strict --profile "databricks-profile"`
+  2. `DATABRICKS_TF_EXEC_PATH=terraform databricks bundle deploy -t dev --profile "databricks-profile"`
+  3. `DATABRICKS_TF_EXEC_PATH=terraform databricks bundle run care_convoy_app -t dev --profile "databricks-profile"`
+  4. `databricks apps get care-convoy --profile "databricks-profile"`
+  5. verify app ACLs and Unity Catalog grants if the app is healthy but still unavailable
+
+Current deployed app URL:
+
+- [care-convoy](https://your-databricks-app-url)
+
+## Native Design Baseline
+
+- [.streamlit/config.toml](.streamlit/config.toml) sets the native Streamlit light theme used by the deployed app.
+- [theme.config.toml](theme.config.toml) is the first design token source-of-truth for the fuller styling pass.
 
 ## What belongs in this repo
 
@@ -8,6 +40,13 @@ Care Convoy is a Databricks Apps MVP for the Virtue Foundation hackathon. The ap
 - Databricks app configuration
 - Tests for project behavior
 - README and other user-facing project docs
+
+## Trust Desk v2
+
+- Candidate facilities are cleaned and normalized before trust scoring.
+- Near-duplicate rows are resolved into canonical facility entities using deterministic matching on name, city, state, domain, and coordinate hints.
+- Facility trust combines dataset social signals with website corroboration from either dataset URLs or a public-search fallback.
+- The app surfaces website verification status and review-required cases instead of presenting all trust scores as equally certain.
 
 ## What stays local-only
 

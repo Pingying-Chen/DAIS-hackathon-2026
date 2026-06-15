@@ -1,0 +1,15 @@
+command:
+  - streamlit
+  - run
+  - src/app.py
+env:
+  - name: LAKEBASE_ENDPOINT
+    valueFrom: shortlist_store
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: mission_warehouse
+  - name: PRIMARY_LLM_ENDPOINT
+    valueFrom: explanation_model
+  - name: HACKATHON_CATALOG
+    value: "databricks_virtue_foundation_dataset_dais_2026"
+  - name: HACKATHON_SCHEMA
+    value: "virtue_foundation_dataset"

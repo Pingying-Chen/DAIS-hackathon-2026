@@ -1,0 +1,11 @@
+[theme]
+brand_hue = 14
+accent_hue = 221
+data_hue = 217
+energy_hue = 38
+bg_lightness = 99
+glass_opacity = 0.92
+shape_corner_px = 10
+motion_base_ms = 50
+font_family = "Inter"
+density = "compact"

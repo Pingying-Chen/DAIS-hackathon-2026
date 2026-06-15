@@ -1,0 +1,10 @@
+# Keep Streamlit aligned with the Databricks Apps base image to avoid
+# replacing the platform's FastAPI-compatible Starlette runtime.
+streamlit==1.38.0
+pandas>=2.2.2
+plotly>=5.22.0
+folium>=0.17.0
+psycopg2-binary>=2.9.9
+databricks-sdk>=0.55.0
+requests>=2.32.3
+beautifulsoup4>=4.12.3
