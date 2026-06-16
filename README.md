@@ -11,7 +11,7 @@ The app is built for non-technical users who need a practical answer: which dist
 - **Author:** Pingying Chen
 - **Co-author:** Zihang Liang
 
-## Judge Fast Read
+## Fast Read
 
 From here, the README is judge-facing: it maps the project to the hackathon track, demo path, evidence model, validation proof, and Databricks resources.
 
