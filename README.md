@@ -10,6 +10,10 @@ Care Convoy is a Databricks Apps submission for the Virtue Foundation Data for G
 - **Core idea:** Do not just rank facilities; decide whether the evidence is strong enough to act on.
 - **Platform:** Databricks Apps, Unity Catalog, SQL Warehouse, Lakebase, Model Serving, Streamlit, pandas, Plotly, and PyDeck.
 
+## Demo Screenshot
+
+![Care Convoy v5.2 demo showing the Maharashtra referral map and mission packet](docs/assets/care-convoy-demo.jpg)
+
 ## How To Use It
 
 1. Choose a care need such as maternal health, surgery, emergency care, or general access.
@@ -89,7 +93,7 @@ flowchart LR
 - Python syntax compilation passes.
 - Local Streamlit health check passes at `/_stcore/health`.
 - Dependency audit returned no known vulnerabilities.
-- The v5.2 Databricks App deployment `01f16931dca910659fe8bb8d829475ae` is `RUNNING`.
+- The v5.2 Databricks App is deployed and `RUNNING`.
 - Lakebase read-after-write smoke confirmed shortlist metadata can persist and reload.
 - Live Databricks data checks confirmed all three provided tables are populated, and the current code path returns live NFHS plus Maharashtra facility-density rows without falling back.
 
