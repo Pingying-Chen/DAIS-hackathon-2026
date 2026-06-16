@@ -6,7 +6,6 @@ include:
 
 sync:
   include:
-    - .env.example
     - .gitignore
     - .streamlit/**
     - README.md
