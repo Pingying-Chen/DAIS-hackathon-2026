@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
+from hashlib import sha1
 import json
 import os
 import re
@@ -18,6 +19,10 @@ from src.db.warehouse import run_sql
 CATALOG = os.environ.get("HACKATHON_CATALOG", "databricks_virtue_foundation_dataset_dais_2026")
 SCHEMA = os.environ.get("HACKATHON_SCHEMA", "virtue_foundation_dataset")
 FACILITY_CANDIDATE_WINDOW = 160
+ENTITY_INDEX_VERSION = "care-convoy-entity-index-v1"
+ENTITY_RESOLUTION_PAIRWISE_LIMIT = 350
+ENTITY_RESOLUTION_MAX_BLOCK_SIZE = 250
+_SQL_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 MISSION_KEYWORDS = {
     "maternal_health": ["maternal", "obstetric", "delivery", "nicu"],
@@ -106,20 +111,85 @@ WEBSITE_SIGNAL_COLUMNS = [
     "name_match_score",
     "domain_matches_dataset",
 ]
+ENTITY_INDEX_COLUMNS = [
+    "entity_index_version",
+    "facility_id",
+    "facility_name",
+    "resolved_entity_id",
+    "canonical_name",
+    "entity_record_count",
+    "entity_match_confidence",
+    "entity_match_reasons",
+    "duplicate_review_required",
+    "entity_search_text",
+    "address_city",
+    "address_stateOrRegion",
+    "address_zipOrPostcode",
+    "website_domain",
+    "primary_source_url",
+    "source_row_fingerprint",
+    "source_table",
+    "built_at",
+]
+SOURCE_ROW_FINGERPRINT_COLUMNS = FACILITY_TEXT_COLUMNS
+_CACHED_ENTITY_COLUMNS = [
+    "resolved_entity_id",
+    "canonical_name",
+    "entity_record_count",
+    "entity_match_confidence",
+    "entity_match_reasons",
+    "duplicate_review_required",
+]
 _FACILITY_STOPWORDS = {
     "and",
     "care",
     "centre",
+    "centres",
     "center",
+    "centers",
     "clinic",
+    "clinics",
+    "dental",
+    "diagnostic",
+    "diagnostics",
+    "doctor",
+    "doctors",
+    "dr",
     "foundation",
     "health",
     "healthcare",
+    "home",
     "hospital",
+    "hospitals",
     "india",
     "institute",
+    "lab",
+    "labs",
     "medical",
+    "multispeciality",
+    "multi",
+    "nursing",
+    "speciality",
+    "specialty",
+    "surgical",
     "trust",
+}
+_GENERIC_SOURCE_DOMAINS = {
+    "facebook.com",
+    "hexahealth.com",
+    "hospitalsnearme.in",
+    "indiamart.com",
+    "justdial.com",
+    "latlong.net",
+    "mappls.com",
+    "medindia.net",
+    "medicineindia.org",
+    "onefivenine.com",
+    "policyx.com",
+    "practo.com",
+    "quickerala.com",
+    "sehat.com",
+    "wikipedia.org",
 }
 _STATE_ALIASES = {
     "maharashtra": ["Maharashtra", "Maharastra"],
@@ -137,6 +207,16 @@ def _tag_source(df: pd.DataFrame, source: str) -> pd.DataFrame:
     tagged = df.copy()
     tagged.attrs["source"] = source
     return tagged
+
+
+def entity_index_table_name(value: str | None = None) -> str:
+    raw_table = (value if value is not None else os.environ.get("ENTITY_INDEX_TABLE", "")).strip()
+    if not raw_table:
+        return ""
+    parts = raw_table.split(".")
+    if len(parts) != 3 or not all(_SQL_IDENTIFIER_PATTERN.fullmatch(part) for part in parts):
+        return ""
+    return ".".join(parts)
 
 
 def _empty_search_results() -> pd.DataFrame:
@@ -159,6 +239,16 @@ def _safe_text(value: Any) -> str:
 
 def _non_empty_text(value: Any) -> bool:
     return bool(_safe_text(value))
+
+
+def _truthy_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None or pd.isna(value):
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    return bool(value)
 
 
 def _normalized_name(value: Any) -> str:
@@ -220,6 +310,8 @@ def _source_urls(value: Any) -> list[str]:
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
+        if raw.startswith(("http://", "https://")):
+            return [part.strip() for part in re.split(r",\s*(?=https?://)", raw) if part.strip()]
         return [part.strip() for part in raw.split(",") if part.strip()]
 
     if isinstance(parsed, list):
@@ -239,6 +331,22 @@ def _primary_domain(value: Any) -> str:
         if domain:
             return domain
     return ""
+
+
+def _canonical_domain(value: Any) -> str:
+    domain = _safe_text(value).lower()
+    if domain.startswith("www."):
+        return domain[4:]
+    return domain
+
+
+def _entity_domain(value: Any) -> str:
+    domain = _canonical_domain(value)
+    if not domain:
+        return ""
+    if domain in _GENERIC_SOURCE_DOMAINS or any(domain.endswith(f".{item}") for item in _GENERIC_SOURCE_DOMAINS):
+        return ""
+    return domain
 
 
 def _in_india_scope(country: Any) -> bool:
@@ -415,6 +523,24 @@ def _keyword_sql(mission_type: str, table_alias: str = "") -> str:
             "coalesce(lower({a}description), '') like '%{k}%')".format(a=table_alias, k=safe)
         )
     return " or ".join(parts) or "1 = 1"
+
+
+def _candidate_seed_score_sql(table_alias: str = "") -> str:
+    return """
+      (
+        case when coalesce({a}specialties, '') <> '' then 12 else 0 end +
+        case when coalesce({a}procedure, '') <> '' then 12 else 0 end +
+        case when coalesce({a}equipment, '') <> '' then 12 else 0 end +
+        case when coalesce({a}capability, '') <> '' then 12 else 0 end +
+        case when coalesce({a}description, '') <> '' then 12 else 0 end +
+        case when coalesce({a}source_urls, '') <> '' then 12 else 0 end +
+        coalesce(try_cast({a}numberDoctors as double), 0.0) * 0.7 +
+        coalesce(try_cast({a}capacity as double), 0.0) * 0.08 +
+        coalesce(try_cast({a}distinct_social_media_presence_count as double), 0.0) * 14 +
+        coalesce(try_cast({a}affiliated_staff_presence as double), 0.0) * 18 +
+        coalesce(try_cast({a}custom_logo_presence as double), 0.0) * 10
+      )
+    """.format(a=table_alias)
 
 
 def _empty_density_frame() -> pd.DataFrame:
@@ -716,13 +842,31 @@ def _entity_match(left: pd.Series, right: pd.Series) -> tuple[float, list[str]]:
     reasons: list[str] = []
     score = 0.0
 
-    left_domain = _safe_text(left.get("website_domain"))
-    right_domain = _safe_text(right.get("website_domain"))
-    if left_domain and right_domain and left_domain == right_domain:
+    left_id = _safe_text(left.get("unique_id"))
+    right_id = _safe_text(right.get("unique_id"))
+    if left_id and right_id and left_id == right_id:
+        return 1.0, ["shared unique id"]
+
+    left_name = _safe_text(left.get("normalized_name"))
+    right_name = _safe_text(right.get("normalized_name"))
+    if not left_name or not right_name:
+        return 0.0, []
+
+    name_similarity = SequenceMatcher(None, left_name, right_name).ratio()
+    if name_similarity < 0.8:
+        return 0.0, []
+
+    left_domain = _entity_domain(left.get("website_domain"))
+    right_domain = _entity_domain(right.get("website_domain"))
+    shared_domain = bool(left_domain and right_domain and left_domain == right_domain)
+    shared_tokens = set(left_name.split()).intersection(right_name.split())
+    if not shared_tokens and name_similarity < 0.95 and not shared_domain:
+        return 0.0, []
+
+    if shared_domain:
         score += 0.52
         reasons.append("shared website domain")
 
-    name_similarity = SequenceMatcher(None, _safe_text(left.get("normalized_name")), _safe_text(right.get("normalized_name"))).ratio()
     if name_similarity >= 0.95:
         score += 0.34
         reasons.append("near-exact normalized name")
@@ -749,11 +893,77 @@ def _entity_match(left: pd.Series, right: pd.Series) -> tuple[float, list[str]]:
     if left.get("address_zipOrPostcode") and left.get("address_zipOrPostcode") == right.get("address_zipOrPostcode"):
         score += 0.08
         reasons.append("shared postcode")
+        if name_similarity >= 0.95 and same_city:
+            score += 0.24
+            reasons.append("same name and postcode")
 
     return min(score, 1.0), reasons
 
 
-def resolve_facility_entities(df: pd.DataFrame) -> pd.DataFrame:
+def _entity_block_keys(row: pd.Series) -> list[str]:
+    keys: list[str] = []
+    unique_id = _safe_text(row.get("unique_id"))
+    if unique_id:
+        keys.append(f"id:{unique_id}")
+
+    domain = _entity_domain(row.get("website_domain"))
+    if domain:
+        keys.append(f"domain:{domain}")
+
+    normalized_name = _safe_text(row.get("normalized_name"))
+    normalized_city = _safe_text(row.get("normalized_city"))
+    normalized_state = _safe_text(row.get("normalized_state"))
+    postcode = _location_key(row.get("address_zipOrPostcode"))
+    if normalized_name and normalized_city:
+        keys.append(f"name_city:{normalized_name}|{normalized_city}")
+    if normalized_name and normalized_state:
+        keys.append(f"name_state:{normalized_name}|{normalized_state}")
+    if normalized_name and postcode:
+        keys.append(f"name_postcode:{normalized_name}|{postcode}")
+    return list(dict.fromkeys(keys))
+
+
+def _entity_candidate_pairs(resolved: pd.DataFrame, use_blocks: bool) -> list[tuple[int, int]]:
+    if not use_blocks or len(resolved) <= ENTITY_RESOLUTION_PAIRWISE_LIMIT:
+        return [
+            (left_index, right_index)
+            for left_index in range(len(resolved))
+            for right_index in range(left_index + 1, len(resolved))
+        ]
+
+    blocks: dict[str, list[int]] = defaultdict(list)
+    for index, row in resolved.iterrows():
+        for key in _entity_block_keys(row):
+            blocks[key].append(index)
+
+    pairs: set[tuple[int, int]] = set()
+    for members in blocks.values():
+        if len(members) < 2 or len(members) > ENTITY_RESOLUTION_MAX_BLOCK_SIZE:
+            continue
+        sorted_members = sorted(set(members))
+        for offset, left_index in enumerate(sorted_members):
+            for right_index in sorted_members[offset + 1 :]:
+                pairs.add((left_index, right_index))
+    return sorted(pairs)
+
+
+def _stable_resolved_entity_id(resolved: pd.DataFrame, canonical_index: int) -> str:
+    seed_parts = [
+        _safe_text(resolved.loc[canonical_index, "unique_id"]),
+        _safe_text(resolved.loc[canonical_index, "normalized_name"]),
+        _safe_text(resolved.loc[canonical_index, "normalized_city"]),
+        _safe_text(resolved.loc[canonical_index, "normalized_state"]),
+    ]
+    seed = "|".join(part for part in seed_parts if part) or str(canonical_index)
+    return f"entity-{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
+
+
+def resolve_facility_entities(
+    df: pd.DataFrame,
+    *,
+    use_blocks: bool = False,
+    stable_ids: bool = False,
+) -> pd.DataFrame:
     if df.empty:
         empty = df.copy()
         empty["resolved_entity_id"] = []
@@ -780,12 +990,11 @@ def resolve_facility_entities(df: pd.DataFrame) -> pd.DataFrame:
         if left_root != right_root:
             parent[right_root] = left_root
 
-    for left_index in range(len(resolved)):
-        for right_index in range(left_index + 1, len(resolved)):
-            score, reasons = _entity_match(resolved.iloc[left_index], resolved.iloc[right_index])
-            if score >= 0.84:
-                union(left_index, right_index)
-                pair_scores.append((left_index, right_index, score, reasons))
+    for left_index, right_index in _entity_candidate_pairs(resolved, use_blocks):
+        score, reasons = _entity_match(resolved.iloc[left_index], resolved.iloc[right_index])
+        if score >= 0.84:
+            union(left_index, right_index)
+            pair_scores.append((left_index, right_index, score, reasons))
 
     clusters: dict[int, list[int]] = defaultdict(list)
     for index in range(len(resolved)):
@@ -808,7 +1017,11 @@ def resolve_facility_entities(df: pd.DataFrame) -> pd.DataFrame:
             reasons.extend(match_reasons)
         reason_text = ", ".join(dict.fromkeys(reasons)) if reasons else "single row candidate"
         cluster_details[canonical_index] = {
-            "resolved_entity_id": f"entity-{cluster_number:02d}",
+            "resolved_entity_id": (
+                _stable_resolved_entity_id(resolved, canonical_index)
+                if stable_ids
+                else f"entity-{cluster_number:02d}"
+            ),
             "canonical_name": _safe_text(resolved.loc[canonical_index, "name"]),
             "entity_record_count": len(member_indexes),
             "entity_match_confidence": round(match_confidence, 2),
@@ -827,6 +1040,120 @@ def resolve_facility_entities(df: pd.DataFrame) -> pd.DataFrame:
             resolved.loc[member_index, "duplicate_review_required"] = detail["duplicate_review_required"]
 
     return resolved
+
+
+def _has_cached_entity_mapping(df: pd.DataFrame) -> bool:
+    if df.empty or not set(_CACHED_ENTITY_COLUMNS).issubset(df.columns):
+        return False
+    return bool(_cached_entity_mask(df).all())
+
+
+def _cached_entity_mask(df: pd.DataFrame) -> pd.Series:
+    if df.empty or not set(_CACHED_ENTITY_COLUMNS).issubset(df.columns):
+        return pd.Series(False, index=df.index)
+    resolved_ids = df["resolved_entity_id"].fillna("").astype(str).str.strip()
+    record_counts = pd.to_numeric(df["entity_record_count"], errors="coerce").fillna(0)
+    match_confidence = pd.to_numeric(df["entity_match_confidence"], errors="coerce").fillna(0)
+    return resolved_ids.ne("") & record_counts.gt(0) & match_confidence.gt(0)
+
+
+def _apply_cached_entity_mapping(df: pd.DataFrame) -> pd.DataFrame:
+    mapped = df.copy()
+    mapped["resolved_entity_id"] = mapped["resolved_entity_id"].apply(_safe_text)
+    mapped["canonical_name"] = mapped["canonical_name"].apply(_safe_text)
+    mapped["entity_record_count"] = pd.to_numeric(mapped["entity_record_count"], errors="coerce").fillna(1)
+    mapped["entity_match_confidence"] = pd.to_numeric(mapped["entity_match_confidence"], errors="coerce").fillna(1.0)
+    mapped["entity_match_reasons"] = mapped["entity_match_reasons"].apply(_safe_text)
+    mapped["duplicate_review_required"] = mapped["duplicate_review_required"].apply(_truthy_value)
+    return mapped
+
+
+def _resolve_entity_frame(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+    if _has_cached_entity_mapping(df):
+        return _apply_cached_entity_mapping(df), "cached"
+    cached_mask = _cached_entity_mask(df)
+    if bool(cached_mask.any()):
+        cached = _apply_cached_entity_mapping(df[cached_mask])
+        runtime = resolve_facility_entities(df[~cached_mask])
+        return pd.concat([cached, runtime]).sort_index(), "partial"
+    return resolve_facility_entities(df), "runtime"
+
+
+def _primary_source_url(value: Any) -> str:
+    urls = _source_urls(value)
+    return urls[0] if urls else ""
+
+
+def _entity_search_text(row: pd.Series) -> str:
+    source_urls = " ".join(_source_urls(row.get("source_urls"))[:3])
+    parts = [
+        row.get("canonical_name"),
+        row.get("name"),
+        row.get("address_city"),
+        row.get("address_stateOrRegion"),
+        row.get("address_zipOrPostcode"),
+        row.get("specialties"),
+        row.get("procedure"),
+        row.get("equipment"),
+        row.get("capability"),
+        row.get("description"),
+        row.get("website_domain"),
+        source_urls,
+    ]
+    return " ".join(dict.fromkeys(_safe_text(part) for part in parts if _non_empty_text(part)))[:4000]
+
+
+def _source_fingerprint_value(row: pd.Series, column: str) -> str:
+    if column == "source_urls":
+        return _primary_source_url(row.get(column))
+    if column == "description":
+        return _safe_text(row.get(column))[:2000]
+    return _safe_text(row.get(column))
+
+
+def _source_row_fingerprint(row: pd.Series) -> str:
+    fingerprint_text = "||".join(_source_fingerprint_value(row, column) for column in SOURCE_ROW_FINGERPRINT_COLUMNS)
+    return sha1(fingerprint_text.encode("utf-8")).hexdigest()
+
+
+def build_entity_index_frame(raw: pd.DataFrame) -> pd.DataFrame:
+    cleaned = _clean_facility_candidates(raw)
+    resolved = resolve_facility_entities(cleaned, use_blocks=True, stable_ids=True)
+    built_at = datetime.now(timezone.utc).isoformat()
+    index = pd.DataFrame(
+        {
+            "entity_index_version": ENTITY_INDEX_VERSION,
+            "facility_id": resolved["unique_id"].apply(_safe_text),
+            "facility_name": resolved["name"].apply(_safe_text),
+            "resolved_entity_id": resolved["resolved_entity_id"].apply(_safe_text),
+            "canonical_name": resolved["canonical_name"].apply(_safe_text),
+            "entity_record_count": pd.to_numeric(resolved["entity_record_count"], errors="coerce").fillna(1).astype(int),
+            "entity_match_confidence": pd.to_numeric(
+                resolved["entity_match_confidence"], errors="coerce"
+            ).fillna(1.0),
+            "entity_match_reasons": resolved["entity_match_reasons"].apply(_safe_text),
+            "duplicate_review_required": resolved["duplicate_review_required"].apply(_truthy_value),
+            "entity_search_text": resolved.apply(_entity_search_text, axis=1),
+            "address_city": resolved["address_city"].apply(_safe_text),
+            "address_stateOrRegion": resolved["address_stateOrRegion"].apply(_safe_text),
+            "address_zipOrPostcode": resolved["address_zipOrPostcode"].apply(_safe_text),
+            "website_domain": resolved["website_domain"].apply(_safe_text),
+            "primary_source_url": resolved["source_urls"].apply(_primary_source_url),
+            "source_row_fingerprint": resolved.apply(_source_row_fingerprint, axis=1),
+            "source_table": _unity_catalog_uri("facilities"),
+            "built_at": built_at,
+        }
+    )
+    index = (
+        index.sort_values(
+            ["entity_record_count", "entity_match_confidence", "facility_name"],
+            ascending=[False, False, True],
+        )
+        .drop_duplicates(["facility_id", "source_row_fingerprint"])
+        .sort_values(["facility_name", "facility_id"])
+        .reset_index(drop=True)
+    )
+    return index[ENTITY_INDEX_COLUMNS]
 
 
 def _search_result_match_score(entity: pd.Series, result: pd.Series) -> float:
@@ -1211,11 +1538,13 @@ def _attach_artifacts(
     trust_reviews: pd.DataFrame,
     search_results: pd.DataFrame,
     website_signals: pd.DataFrame,
+    entity_index_source: str,
 ) -> pd.DataFrame:
     tagged = _tag_source(df, source)
     tagged.attrs["trust_reviews"] = trust_reviews
     tagged.attrs["search_results"] = search_results
     tagged.attrs["website_signals"] = website_signals
+    tagged.attrs["entity_index_source"] = entity_index_source
     return tagged
 
 
@@ -1226,7 +1555,7 @@ def _build_facility_review_frame(
     allow_web_enrichment: bool,
 ) -> pd.DataFrame:
     cleaned = _clean_facility_candidates(base)
-    resolved = resolve_facility_entities(cleaned)
+    resolved, entity_index_source = _resolve_entity_frame(cleaned)
     search_results = search_facility_sources(resolved, allow_search=allow_web_enrichment)
     website_signals = collect_website_signals(resolved, search_results, allow_web_enrichment=allow_web_enrichment)
     trust_reviews = build_trust_reviews(resolved, search_results, website_signals, source=source)
@@ -1281,7 +1610,112 @@ def _build_facility_review_frame(
     filtered_reviews = trust_reviews[trust_reviews["resolved_entity_id"].isin(entity_ids)].copy()
     filtered_search = search_results[search_results["resolved_entity_id"].isin(entity_ids)].copy()
     filtered_signals = website_signals[website_signals["resolved_entity_id"].isin(entity_ids)].copy()
-    return _attach_artifacts(filtered, source, filtered_reviews, filtered_search, filtered_signals)
+    return _attach_artifacts(
+        filtered,
+        source,
+        filtered_reviews,
+        filtered_search,
+        filtered_signals,
+        entity_index_source,
+    )
+
+
+def _facility_select_list(table_alias: str = "") -> str:
+    return f"""
+      {table_alias}unique_id,
+      {table_alias}name,
+      {table_alias}address_city,
+      {table_alias}address_stateOrRegion,
+      {table_alias}address_zipOrPostcode,
+      {table_alias}address_country,
+      {table_alias}specialties,
+      {table_alias}procedure,
+      {table_alias}equipment,
+      {table_alias}capability,
+      {table_alias}description,
+      {table_alias}source_urls,
+      {table_alias}distinct_social_media_presence_count,
+      {table_alias}affiliated_staff_presence,
+      {table_alias}custom_logo_presence,
+      {table_alias}numberDoctors,
+      {table_alias}capacity,
+      {table_alias}recency_of_page_update,
+      {table_alias}latitude,
+      {table_alias}longitude
+    """
+
+
+def _source_row_fingerprint_sql(table_alias: str = "") -> str:
+    expressions: list[str] = []
+    for column in SOURCE_ROW_FINGERPRINT_COLUMNS:
+        if column == "source_urls":
+            expression = f"""
+            case
+              when trim(cast({table_alias}source_urls as string)) like '[%'
+                then coalesce(get_json_object(cast({table_alias}source_urls as string), '$[0]'), cast({table_alias}source_urls as string))
+              else cast({table_alias}source_urls as string)
+            end
+            """
+        elif column == "description":
+            expression = f"left(cast({table_alias}description as string), 2000)"
+        else:
+            expression = f"cast({table_alias}{column} as string)"
+        expressions.append(f"coalesce({expression}, '')")
+    return f"sha1(concat_ws('||', {', '.join(expressions)}))"
+
+
+def _facility_candidate_sql(
+    mission_type: str,
+    state_clause: str,
+    district_clause: str,
+    *,
+    use_entity_index: bool,
+) -> str:
+    entity_table = entity_index_table_name()
+    if use_entity_index and not entity_table:
+        return ""
+
+    table_alias = "f." if use_entity_index else ""
+    keyword_filter = _keyword_sql(mission_type, table_alias)
+    candidate_seed_score = _candidate_seed_score_sql(table_alias)
+    select_list = _facility_select_list(table_alias)
+    if use_entity_index:
+        select_list = (
+            select_list
+            + f""",
+      ei.resolved_entity_id,
+      ei.canonical_name,
+      ei.entity_record_count,
+      ei.entity_match_confidence,
+      ei.entity_match_reasons,
+      ei.duplicate_review_required,
+      ei.entity_search_text,
+      ei.source_row_fingerprint,
+      ei.entity_index_version
+    """
+        )
+        from_clause = f"""
+    from {CATALOG}.{SCHEMA}.facilities f
+    left join {entity_table} ei
+      on cast(f.unique_id as string) = ei.facility_id
+      and ei.entity_index_version = '{ENTITY_INDEX_VERSION}'
+      and ei.source_row_fingerprint = {_source_row_fingerprint_sql("f.")}
+        """
+    else:
+        from_clause = f"from {CATALOG}.{SCHEMA}.facilities"
+
+    return f"""
+    select
+      {select_list},
+      {candidate_seed_score} as candidate_seed_score
+    {from_clause}
+    where ({state_clause})
+      and ({district_clause})
+      and coalesce(lower({table_alias}address_country), '') like '%india%'
+      and ({keyword_filter})
+    order by candidate_seed_score desc, coalesce({table_alias}name, '') asc, coalesce({table_alias}unique_id, '') asc
+    limit {FACILITY_CANDIDATE_WINDOW}
+    """
 
 
 def get_facility_candidates(
@@ -1290,7 +1724,6 @@ def get_facility_candidates(
     district_filter: str,
     confidence_threshold: float,
 ) -> pd.DataFrame:
-    keyword_filter = _keyword_sql(mission_type)
     parameters: dict[str, object] = {}
     state_clause = "1 = 1"
     if state_filter:
@@ -1304,54 +1737,25 @@ def get_facility_candidates(
         )
         parameters["district_filter"] = f"%{district_filter}%"
 
-    candidate_seed_score = """
-      (
-        case when coalesce(specialties, '') <> '' then 12 else 0 end +
-        case when coalesce(procedure, '') <> '' then 12 else 0 end +
-        case when coalesce(equipment, '') <> '' then 12 else 0 end +
-        case when coalesce(capability, '') <> '' then 12 else 0 end +
-        case when coalesce(description, '') <> '' then 12 else 0 end +
-        case when coalesce(source_urls, '') <> '' then 12 else 0 end +
-        coalesce(try_cast(numberDoctors as double), 0.0) * 0.7 +
-        coalesce(try_cast(capacity as double), 0.0) * 0.08 +
-        coalesce(try_cast(distinct_social_media_presence_count as double), 0.0) * 14 +
-        coalesce(try_cast(affiliated_staff_presence as double), 0.0) * 18 +
-        coalesce(try_cast(custom_logo_presence as double), 0.0) * 10
-      )
-    """
-
-    sql = f"""
-    select
-      unique_id,
-      name,
-      address_city,
-      address_stateOrRegion,
-      address_zipOrPostcode,
-      address_country,
-      specialties,
-      procedure,
-      equipment,
-      capability,
-      description,
-      source_urls,
-      distinct_social_media_presence_count,
-      affiliated_staff_presence,
-      custom_logo_presence,
-      numberDoctors,
-      capacity,
-      recency_of_page_update,
-      latitude,
-      longitude,
-      {candidate_seed_score} as candidate_seed_score
-    from {CATALOG}.{SCHEMA}.facilities
-    where ({state_clause})
-      and ({district_clause})
-      and coalesce(lower(address_country), '') like '%india%'
-      and ({keyword_filter})
-    order by candidate_seed_score desc, coalesce(name, '') asc, coalesce(unique_id, '') asc
-    limit {FACILITY_CANDIDATE_WINDOW}
-    """
-    raw = run_sql(sql, parameters=parameters)
+    cached_state_clause = state_clause.replace("address_stateOrRegion", "f.address_stateOrRegion")
+    cached_district_clause = district_clause.replace("address_city", "f.address_city").replace(
+        "address_zipOrPostcode", "f.address_zipOrPostcode"
+    )
+    cached_sql = _facility_candidate_sql(
+        mission_type,
+        cached_state_clause,
+        cached_district_clause,
+        use_entity_index=True,
+    )
+    raw = run_sql(cached_sql, parameters=parameters) if cached_sql else pd.DataFrame()
+    if raw.empty:
+        sql = _facility_candidate_sql(
+            mission_type,
+            state_clause,
+            district_clause,
+            use_entity_index=False,
+        )
+        raw = run_sql(sql, parameters=parameters)
     if raw.empty:
         return _build_facility_review_frame(
             _fallback_facilities(state_filter),

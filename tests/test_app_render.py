@@ -12,9 +12,12 @@ def test_app_initial_render_is_stable() -> None:
 
     assert not app.exception
     assert any(button.label == "Build Referral Plan" for button in app.button)
+    assert any(button.label == "Open App Introduction" for button in app.button)
+    assert any(selectbox.label == "State" for selectbox in app.selectbox)
+    assert any(selectbox.label == "District" for selectbox in app.selectbox)
     rendered_markdown = "\n".join(markdown.value for markdown in app.markdown)
     assert "v5.3 Mission Control" in rendered_markdown
-    assert "Mission Control opens here" in rendered_markdown
+    assert "Most important India alert" in rendered_markdown
 
 
 def test_decision_options_follow_mission_packet_action() -> None:

@@ -90,6 +90,80 @@ def test_resolve_facility_entities_clusters_duplicate_rows() -> None:
     assert "shared website domain" in resolved.iloc[0]["entity_match_reasons"]
 
 
+def test_source_urls_keeps_commas_inside_single_url() -> None:
+    urls = tools._source_urls("https://en.wikipedia.org/wiki/Holy_Family_Hospital,_Mumbai")
+
+    assert urls == ["https://en.wikipedia.org/wiki/Holy_Family_Hospital,_Mumbai"]
+
+
+def test_resolve_facility_entities_ignores_generic_listing_domain_for_different_names() -> None:
+    raw = pd.DataFrame(
+        [
+            {
+                "unique_id": "facility-a",
+                "name": "North Surgical Hospital",
+                "address_city": "Nashik",
+                "address_stateOrRegion": "Maharashtra",
+                "address_zipOrPostcode": "422001",
+                "address_country": "India",
+                "source_urls": '["https://www.justdial.com/nashik/north"]',
+                "latitude": 19.991,
+                "longitude": 73.782,
+            },
+            {
+                "unique_id": "facility-b",
+                "name": "South Eye Centre",
+                "address_city": "Nashik",
+                "address_stateOrRegion": "Maharashtra",
+                "address_zipOrPostcode": "422001",
+                "address_country": "India",
+                "source_urls": '["https://www.justdial.com/nashik/south"]',
+                "latitude": 19.992,
+                "longitude": 73.783,
+            },
+        ]
+    )
+    cleaned = tools._clean_facility_candidates(raw)
+    resolved = tools.resolve_facility_entities(cleaned)
+
+    assert resolved.iloc[0]["resolved_entity_id"] != resolved.iloc[1]["resolved_entity_id"]
+    assert int(resolved.iloc[0]["entity_record_count"]) == 1
+
+
+def test_resolve_facility_entities_requires_distinctive_name_match() -> None:
+    raw = pd.DataFrame(
+        [
+            {
+                "unique_id": "facility-a",
+                "name": "Sigma Hospitals",
+                "address_city": "Hyderabad",
+                "address_stateOrRegion": "Andhra Pradesh",
+                "address_zipOrPostcode": "500055",
+                "address_country": "India",
+                "source_urls": '["https://www.medicineindia.org/hospitals-in-city/hyderabad-andhra-pradesh"]',
+                "latitude": 17.5,
+                "longitude": 78.4,
+            },
+            {
+                "unique_id": "facility-b",
+                "name": "Spark Hospitals",
+                "address_city": "Hyderabad",
+                "address_stateOrRegion": "Andhra Pradesh",
+                "address_zipOrPostcode": "500039",
+                "address_country": "India",
+                "source_urls": '["https://www.medicineindia.org/hospitals-in-city/hyderabad-andhra-pradesh"]',
+                "latitude": 17.501,
+                "longitude": 78.401,
+            },
+        ]
+    )
+    cleaned = tools._clean_facility_candidates(raw)
+    resolved = tools.resolve_facility_entities(cleaned)
+
+    assert resolved.iloc[0]["resolved_entity_id"] != resolved.iloc[1]["resolved_entity_id"]
+    assert int(resolved.iloc[0]["entity_record_count"]) == 1
+
+
 def test_search_facility_sources_prefers_dataset_url(monkeypatch) -> None:
     cleaned = tools._clean_facility_candidates(_facility_rows().head(1))
     resolved = tools.resolve_facility_entities(cleaned)
@@ -258,3 +332,138 @@ def test_build_facility_review_frame_returns_one_row_per_resolved_entity() -> No
     assert len(frame) == 1
     assert frame.iloc[0]["resolved_entity_id"] == "entity-01"
     assert int(frame.iloc[0]["entity_record_count"]) == 2
+
+
+def test_build_facility_review_frame_uses_cached_entity_mapping(monkeypatch) -> None:
+    cached = _facility_rows().head(2).copy()
+    cached["resolved_entity_id"] = "entity-cache-1"
+    cached["canonical_name"] = "Sunrise Surgical Hospital"
+    cached["entity_record_count"] = 2
+    cached["entity_match_confidence"] = 0.96
+    cached["entity_match_reasons"] = "precomputed entity index"
+    cached["duplicate_review_required"] = False
+
+    def fail_runtime_resolution(*args: object, **kwargs: object) -> pd.DataFrame:
+        raise AssertionError("cached entity mapping should skip runtime resolution")
+
+    monkeypatch.setattr(tools, "resolve_facility_entities", fail_runtime_resolution)
+
+    frame = tools._build_facility_review_frame(
+        cached,
+        source="live",
+        confidence_threshold=0.25,
+        allow_web_enrichment=False,
+    )
+
+    assert len(frame) == 1
+    assert frame.attrs["entity_index_source"] == "cached"
+    assert frame.iloc[0]["resolved_entity_id"] == "entity-cache-1"
+    assert int(frame.iloc[0]["entity_record_count"]) == 2
+
+
+def test_build_facility_review_frame_uses_runtime_when_cache_is_incomplete(monkeypatch) -> None:
+    cached = _facility_rows().head(1).copy()
+    cached["resolved_entity_id"] = ""
+    cached["canonical_name"] = ""
+    cached["entity_record_count"] = 0
+    cached["entity_match_confidence"] = 0.0
+    cached["entity_match_reasons"] = ""
+    cached["duplicate_review_required"] = False
+
+    def runtime_resolution(df: pd.DataFrame, *args: object, **kwargs: object) -> pd.DataFrame:
+        resolved = df.copy()
+        resolved["resolved_entity_id"] = "entity-runtime-1"
+        resolved["canonical_name"] = resolved["name"]
+        resolved["entity_record_count"] = 1
+        resolved["entity_match_confidence"] = 1.0
+        resolved["entity_match_reasons"] = "single row candidate"
+        resolved["duplicate_review_required"] = False
+        return resolved
+
+    monkeypatch.setattr(tools, "resolve_facility_entities", runtime_resolution)
+
+    frame = tools._build_facility_review_frame(
+        cached,
+        source="live",
+        confidence_threshold=0.25,
+        allow_web_enrichment=False,
+    )
+
+    assert frame.attrs["entity_index_source"] == "runtime"
+    assert frame.iloc[0]["resolved_entity_id"] == "entity-runtime-1"
+
+
+def test_resolve_entity_frame_partially_uses_cache_for_mixed_rows(monkeypatch) -> None:
+    mixed = _facility_rows().head(2).copy()
+    mixed.loc[mixed.index[0], "resolved_entity_id"] = "entity-cache-1"
+    mixed.loc[mixed.index[0], "canonical_name"] = "Sunrise Surgical Hospital"
+    mixed.loc[mixed.index[0], "entity_record_count"] = 1
+    mixed.loc[mixed.index[0], "entity_match_confidence"] = 1.0
+    mixed.loc[mixed.index[0], "entity_match_reasons"] = "precomputed entity index"
+    mixed.loc[mixed.index[0], "duplicate_review_required"] = False
+    mixed.loc[mixed.index[1], "resolved_entity_id"] = ""
+    mixed.loc[mixed.index[1], "canonical_name"] = ""
+    mixed.loc[mixed.index[1], "entity_record_count"] = 0
+    mixed.loc[mixed.index[1], "entity_match_confidence"] = 0.0
+    mixed.loc[mixed.index[1], "entity_match_reasons"] = ""
+    mixed.loc[mixed.index[1], "duplicate_review_required"] = False
+
+    def runtime_resolution(df: pd.DataFrame, *args: object, **kwargs: object) -> pd.DataFrame:
+        assert list(df["unique_id"]) == ["facility-2"]
+        resolved = df.copy()
+        resolved["resolved_entity_id"] = "entity-runtime-1"
+        resolved["canonical_name"] = resolved["name"]
+        resolved["entity_record_count"] = 1
+        resolved["entity_match_confidence"] = 1.0
+        resolved["entity_match_reasons"] = "single row candidate"
+        resolved["duplicate_review_required"] = False
+        return resolved
+
+    monkeypatch.setattr(tools, "resolve_facility_entities", runtime_resolution)
+
+    resolved, source = tools._resolve_entity_frame(mixed)
+
+    assert source == "partial"
+    assert list(resolved["resolved_entity_id"]) == ["entity-cache-1", "entity-runtime-1"]
+
+
+def test_build_entity_index_frame_is_search_ready() -> None:
+    index = tools.build_entity_index_frame(_facility_rows())
+
+    sunrise = index[index["facility_id"].isin(["facility-1", "facility-2"])]
+
+    assert list(index.columns) == tools.ENTITY_INDEX_COLUMNS
+    assert sunrise["resolved_entity_id"].nunique() == 1
+    assert sunrise.iloc[0]["resolved_entity_id"].startswith("entity-")
+    assert "Emergency obstetrics" in sunrise.iloc[0]["entity_search_text"]
+    assert sunrise.iloc[0]["source_row_fingerprint"]
+    assert len(sunrise.iloc[0]["source_row_fingerprint"]) == 40
+    assert set(sunrise["primary_source_url"]) == {
+        "https://sunrise.example.org",
+        "https://sunrise.example.org/about",
+    }
+
+
+def test_source_row_fingerprint_changes_when_source_identity_changes() -> None:
+    base = _facility_rows().head(1)
+    changed = base.copy()
+    changed.loc[changed.index[0], "name"] = "Sunrise Surgical Annex"
+
+    base_fingerprint = tools.build_entity_index_frame(base).iloc[0]["source_row_fingerprint"]
+    changed_fingerprint = tools.build_entity_index_frame(changed).iloc[0]["source_row_fingerprint"]
+
+    assert base_fingerprint != changed_fingerprint
+
+
+def test_build_entity_index_frame_keeps_non_unique_ids_by_fingerprint() -> None:
+    raw = _facility_rows().head(1)
+    duplicate_id_variant = raw.copy()
+    duplicate_id_variant.loc[duplicate_id_variant.index[0], "description"] = "Updated source description."
+    combined = pd.concat([raw, duplicate_id_variant], ignore_index=True)
+
+    index = tools.build_entity_index_frame(combined)
+
+    assert len(index) == 2
+    assert index["facility_id"].nunique() == 1
+    assert index["source_row_fingerprint"].nunique() == 2
+    assert index["resolved_entity_id"].nunique() == 1

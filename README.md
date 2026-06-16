@@ -1,120 +1,234 @@
 # Care Convoy
 
-Care Convoy is a Databricks Apps submission for the Virtue Foundation Data for Good hackathon. It helps a Virtue Foundation operations lead decide where to send the next specialty medical team in India by combining district health need, facility capability, cited evidence, uncertainty labels, and a v5.3 Mission Control gate board before a plan is saved.
+**Track 3: Referral Copilot for the Virtue Foundation Data for Good Hackathon**
 
-## Judge Summary
+Care Convoy helps a Virtue Foundation operations lead decide where to send the next specialty medical team in India. It turns the provided facility graph, NFHS district health signals, pincode geography, cited facility evidence, uncertainty labels, Mission Control gates, and Lakebase persistence into one saveable referral mission packet.
 
-- **Track:** Track 3, Referral Copilot with a trust-scoring support layer.
-- **Primary user:** Virtue Foundation operations lead.
-- **Decision improved:** Choose a credible district and facility anchor for the next referral or outreach team.
-- **Core idea:** Do not just rank facilities; decide whether the evidence is strong enough to act on.
-- **Platform:** Databricks Apps, Unity Catalog, SQL Warehouse, Lakebase, Model Serving, Streamlit, pandas, Plotly, and PyDeck.
+- **Author:** Pingying Chen
+- **Co-author:** Zihang Liang
 
-## Demo Screenshot
+## Judge Fast Read
 
-![Care Convoy v5.3 demo showing the Maharashtra referral map and mission packet](docs/assets/care-convoy-demo.jpg)
+| Judging criterion | What Care Convoy proves | Where to look in the demo |
+|---|---|---|
+| Product judgment | A non-technical operations lead can choose a district, referral anchor, and verification action in minutes. | Mission setup, Map + Packet, Shortlist |
+| Evidence and uncertainty | Rankings, facility fit, NFHS context, trust labels, and recommendations show citations or warnings instead of hiding weak evidence. | Trust Evidence, Anchor Review, Mission Control |
+| Technical execution | Runs as a Databricks App using Unity Catalog, SQL Warehouse, a cached entity-index table, Lakebase, Model Serving hooks, MLflow evaluation, Streamlit, pandas, Plotly, and PyDeck. | Live app, Validation Status, Pipeline View |
+| Ambition | The app does not stop at a map or a list. It uses a seven-gate Mission Control workflow to decide whether to shortlist, verify first, or hold. | Mission Control v5.4 |
 
-## How To Use It
+**Best judge takeaway:** Care Convoy turns messy healthcare facility data into an evidence-backed, uncertainty-aware, persistent referral decision.
 
-1. Choose a care need such as maternal health, surgery, emergency care, or general access.
-2. Optionally focus the run by state, district, and minimum certainty.
+## Demo Media
+
+<table>
+  <tr>
+    <td width="58%">
+      <img src="docs/assets/care-convoy-demo.jpg" alt="Care Convoy v5.4 demo showing the Maharashtra referral map and mission packet" width="100%">
+    </td>
+    <td width="42%">
+      <h3>3-minute video placeholder</h3>
+      <p><strong>Status:</strong> add the final Devpost, YouTube, or Loom link here before submission.</p>
+      <ul>
+        <li>0:00 - name Track 3 Referral Copilot.</li>
+        <li>0:20 - build one referral plan.</li>
+        <li>1:10 - show citations and uncertainty gates.</li>
+        <li>2:10 - save the shortlist decision.</li>
+        <li>2:40 - close with Databricks resources and validation.</li>
+      </ul>
+    </td>
+  </tr>
+</table>
+
+## One Decision, End To End
+
+1. Select a care mission such as maternal health, surgery, emergency care, or general access.
+2. Filter by state, district, and minimum certainty when the operator wants a narrower run.
 3. Click **Build Referral Plan**.
-4. Review the top district, map, referral anchor, confidence, warnings, and cited evidence.
-5. Open **Mission Control** to see the pass, review, or block gate across need, supply density, facility fit, trust, evidence, strategy, and supervisor review.
+4. Review the priority district, map, referral anchor, backup anchor, confidence, warnings, and cited evidence.
+5. Open **Mission Control** to see pass, review, or block gates for need, supply density, facility fit, trust, evidence, strategy, and supervisor action.
 6. Open **Trust Evidence** to inspect duplicate resolution, website verification, source URLs, and weak-evidence flags.
-7. Save a shortlist decision with a verification note so the recommendation becomes persistent operational state.
+7. Save a shortlist decision with a verification note so the recommendation becomes durable operational state.
 
-## What Judges Should Look For
+<details open>
+<summary><strong>Interactive judge walkthrough</strong></summary>
 
-- **Clear user workflow:** The app starts with a concrete operational question: where should the next specialty team go?
-- **Provided data in the decision:** Facility records drive anchor selection, NFHS district indicators support need context, and pincode data supports district-density reconciliation.
-- **Evidence-first outputs:** Facility claims, rankings, trust labels, and recommendations are paired with citation rows or visible warning states.
-- **Uncertainty as product behavior:** Missing source URLs, duplicate ambiguity, weak website verification, and weak density joins reduce confidence instead of being hidden.
-- **Persistent action:** Shortlist decisions are saved to Lakebase with the mission packet, gate trace, confidence, facility name, and review metadata.
-- **Databricks-native execution:** The live app uses managed Databricks resources rather than a local-only prototype.
+| Beat | Question the judge can ask | What the app shows |
+|---|---|---|
+| Decide | "Where should the next team go?" | A ranked district and lead referral anchor, not a raw table. |
+| Trust | "Can I believe this facility claim?" | Citation rows, website status, duplicate risk, source URL gaps, and confidence labels. |
+| Act | "What should the operator do next?" | Shortlist, verify-first, or hold action from Mission Control, then a Lakebase-saved decision. |
 
-## Key Features
+</details>
 
-- **Referral planning:** Ranks districts and candidate facility anchors for the selected care need.
-- **NFHS-backed district context:** Uses district health indicators alongside facility-density context to explain why a place should be reviewed.
-- **Trust Desk:** Resolves duplicate-looking facility rows, checks public website evidence, and calculates trust-supported recommendation signals.
-- **Mission Control v5.3:** Separates the decision into need, supply density, facility fit, trust verification, citation safety, mission strategy, and supervisor approval.
-- **Evidence ledger:** Shows source-backed facility text behind important claims and keeps missing citations visible.
-- **Shortlist persistence:** Saves operational decisions and reloads them from Lakebase.
+## Why Care Convoy Is Strong
 
-## Data And Evidence
+- **Referral Mission Planner:** ranks districts and candidate facility anchors for the selected care need.
+- **NFHS-backed need context:** uses district health indicators so the plan reflects demand, not only facility supply.
+- **Facility-density context:** reconciles facility and pincode data to make thin supply visible at district level.
+- **Trust Desk:** uses a cached facility entity index when available, falls back to runtime entity resolution when needed, checks website evidence, and calculates trust-supported recommendation signals.
+- **Evidence Ledger:** shows source-backed facility text and Unity Catalog provenance rows for important claims.
+- **Mission Control v5.4:** separates the recommendation into seven visible pass, review, or block gates and uses the cached entity index for faster Trust Desk resolution.
+- **Cached entity index:** saves resolved facility IDs, canonical names, duplicate-review flags, source-row fingerprints, and grep-ready search text as a Delta table so the normal query path does not re-resolve every candidate.
+- **Lakebase shortlist:** saves the mission packet, gate trace, facility anchor, confidence, decision, and review note.
+- **MLflow evaluation:** validates evidence grounding and operator actionability with registered checks.
 
-Care Convoy uses the provided Virtue Foundation dataset:
-
-- `facilities` for facility names, capabilities, locations, source URLs, social proof proxies, doctors, capacity, and descriptive evidence.
-- `nfhs_5_district_health_indicators` for district-level need signals such as child underweight rate, insurance coverage, institutional births, and high blood pressure prevalence.
-- `india_post_pincode_directory` for district and state reconciliation when estimating facility-density context.
-
-The app treats this data as valuable but imperfect. Weak joins, sparse capability text, missing URLs, stale pages, and duplicate-looking facility records are surfaced as review risks.
-
-## Mission Control
-
-The v5.3 Mission Control gate board helps keep the recommendation from becoming a single opaque score:
-
-- **Need Scout** checks district need and uncertainty.
-- **Supply Mapper** checks facility-density pressure for the district context.
-- **Facility Scout** checks whether the lead facility appears operationally relevant.
-- **Trust Verifier** reviews duplicate resolution, website status, and trust score.
-- **Evidence Auditor** downgrades unsupported or uncited claims.
-- **Mission Strategist** combines need, supply, capability, trust, and evidence into an action recommendation.
-- **Supervisor** produces the final board verdict and confidence used in the saved shortlist.
-
-The mission packet also carries the v5.3 population-denominator data contract, but population context is explicitly marked as planned and inactive until a source and join coverage are validated.
-
-## Architecture At A Glance
+## Optimized Pipeline View
 
 ```mermaid
 flowchart LR
-    user["Operations lead"] --> app["Care Convoy Streamlit app"]
-    app --> setup["Mission setup"]
-    setup --> planner["Referral planner"]
+    user["Operations lead"] --> ui["Streamlit mission setup"]
 
-    planner --> uc["Unity Catalog dataset"]
-    uc --> nfhs["NFHS district indicators"]
-    uc --> facilities["Facility records"]
-    uc --> pincodes["Pincode directory"]
+    subgraph data["1. Data Readiness Module"]
+        uc["Unity Catalog"]
+        facilities["facilities"]
+        nfhs["nfhs_5_district_health_indicators"]
+        pincode["india_post_pincode_directory"]
+        entity["cached entity-index table"]
+        uc --> facilities
+        uc --> nfhs
+        uc --> pincode
+        facilities --> entity
+    end
 
-    planner --> trust["Trust Desk"]
-    trust --> evidence["Evidence ledger"]
-    evidence --> board["Mission Control v5.3"]
-    board --> packet["Referral recommendation"]
-    packet --> lakebase["Lakebase shortlist"]
-    lakebase --> saved["Saved decisions"]
+    subgraph planning["2. Need And Supply Module"]
+        need["NFHS need signal"]
+        density["facility-density context"]
+        district["priority district"]
+        nfhs --> need
+        facilities --> density
+        pincode --> density
+        need --> district
+        density --> district
+    end
+
+    subgraph trust["3. Trust And Evidence Module"]
+        anchors["lead and backup anchors"]
+        verifier["Trust Desk"]
+        citations["Evidence Ledger"]
+        entity --> anchors
+        district --> anchors
+        anchors --> verifier
+        anchors --> citations
+        verifier --> citations
+    end
+
+    subgraph control["4. Mission Control Module"]
+        gates["seven pass-review-block gates"]
+        packet["mission packet"]
+        eval["MLflow evaluation"]
+        save["Lakebase shortlist"]
+        citations --> gates
+        gates --> packet
+        packet --> eval
+        packet --> save
+    end
+
+    ui --> data
+    data --> planning
+    planning --> trust
+    trust --> control
 ```
+
+<details>
+<summary><strong>Module 1 - Data Readiness</strong></summary>
+
+- Reads the three provided Virtue Foundation Unity Catalog tables.
+- Treats sparse capability fields, duplicate-looking facilities, weak source URLs, and district-name mismatch as product risks.
+- Keeps the v5.4 entity-index cache as an optimization path, with source-row fingerprints to avoid stale mappings after dataset updates and runtime entity resolution as fallback.
+
+</details>
+
+<details>
+<summary><strong>Module 2 - Need And Supply</strong></summary>
+
+- Combines NFHS district health indicators with facility-density context.
+- Uses mission type to choose the relevant need and capability signals.
+- Outputs the priority district and uncertainty labels before selecting an anchor.
+
+</details>
+
+<details>
+<summary><strong>Module 3 - Trust And Evidence</strong></summary>
+
+- Ranks lead and backup facility anchors from the provided facilities table.
+- Aligns the Trust Desk review to the selected lead facility, not an unrelated duplicate.
+- Emits citation rows for facility claims and provenance rows for NFHS and density claims.
+
+</details>
+
+<details>
+<summary><strong>Module 4 - Mission Control And Persistence</strong></summary>
+
+- Runs Need Scout, Supply Mapper, Facility Scout, Trust Verifier, Evidence Auditor, Mission Strategist, and Supervisor.
+- Converts the weakest required gate into the operator-facing action: shortlist, verify first, or hold.
+- Saves the accepted decision and gate trace to Lakebase so the app demonstrates persistent action.
+
+</details>
+
+## Data Citations
+
+Care Convoy uses the provided Virtue Foundation dataset as the primary product data source. The first three tables below are part of the Databricks hackathon dataset path `databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset`; the remaining rows are derived or evaluation artifacts that support the flow without replacing the provided data.
+
+| Dataset | Role in the flow | User-facing evidence |
+|---|---|---|
+| `facilities` | Facility names, capabilities, locations, source URLs, social proof proxies, doctors, capacity, descriptions, anchor ranking, and Trust Desk review. | Facility citations, source URL warnings, trust labels, anchor cards. |
+| `nfhs_5_district_health_indicators` | District-level health need signals such as child underweight rate, insurance coverage, institutional births, and high blood pressure prevalence. | NFHS need summary and district provenance rows. |
+| `india_post_pincode_directory` | District and state reconciliation for facility-density context. | Density provenance rows and district supply warnings. |
+| `workspace.default.care_convoy_facility_entity_index` | Derived cache from `facilities` for entity resolution, canonical facility names, duplicate flags, source-row fingerprints, and search-ready text. It is an optimization path, not a new source of truth. | Faster Trust Desk resolution, stale-cache fallback, duplicate-risk alignment, and grep-ready evidence text. |
+| MLflow GenAI evaluation dataset | Validation-only evaluation artifact. It is not used to make product recommendations. | Evidence-grounding and operator-actionability evaluation report. |
+
+No external population denominator, travel-time routing dataset, Spark Declarative Pipeline, or active vector-search corpus is claimed as active in the judged workflow.
+
+## Mission Control v5.4
+
+Mission Control prevents the app from becoming a single opaque ranking.
+
+| Gate | What it checks | Why judges should care |
+|---|---|---|
+| Need Scout | NFHS need indicators and demand uncertainty. | Shows the recommendation starts from health need. |
+| Supply Mapper | Facility-density pressure and district reconciliation. | Separates true shortage from weak joins. |
+| Facility Scout | Lead and backup anchor fit from provided facilities. | Makes the referral plan operational. |
+| Trust Verifier | Duplicate resolution, website status, and trust signal. | Avoids overtrusting messy facility rows. |
+| Evidence Auditor | Lead-anchor citations and unsupported-claim downgrades. | Keeps important claims grounded. |
+| Mission Strategist | Need, supply, capability, trust, and evidence trade-offs. | Converts analysis into action. |
+| Supervisor | Final board verdict and confidence. | Produces the saved shortlist decision. |
 
 ## Validation Status
 
-- Local deterministic tests pass: `41 passed`.
-- Python syntax compilation passes.
-- Local Streamlit health check passes at `/_stcore/health`.
+- Databricks App is `RUNNING`.
+- Hosted UI validation saved a shortlist item and Lakebase readback confirmed the saved decision reloaded.
+- Local deterministic tests passed: `50 passed`.
+- Python syntax compilation passed.
 - Dependency audit returned no known vulnerabilities.
-- The v5.3 Databricks App is deployed and `RUNNING`.
-- Authenticated hosted UI validation saved a shortlist item and a Lakebase readback confirmed the saved decision reloaded.
-- Native MLflow GenAI evaluation ran with dataset `workspace.default.care_convoy_eval_v5_3`, two registered scorers, and 5/5 `yes` results for evidence grounding and operator actionability.
-- Lakebase read-after-write confirmed shortlist metadata can persist and reload.
-- Live Databricks data checks confirmed all three provided tables are populated, and the current code path returns live NFHS plus Maharashtra facility-density rows without falling back.
+- Live Databricks checks confirmed all three provided tables are populated.
+- Current code path returns live NFHS plus Maharashtra facility-density rows without falling back.
+- Cached entity-index table `workspace.default.care_convoy_facility_entity_index` contains `9,989` fingerprinted rows, `9,989` distinct facility IDs, and `9,960` resolved entities.
+- Live v5.4 helper proof returned `district_source=live`, `facility_source=live`, `entity_index_source=cached`, `12` facility rows, `12` entities, and `6` lead-anchor citation rows.
+- Lakebase readback saved note `v5.4 cached entity index readback 20260616T0635Z` after the cached helper run.
+- Databricks App is running with the latest v5.4 cached entity-index configuration.
+- Native MLflow GenAI evaluation ran with two registered checks and 5/5 `yes` results for evidence grounding and operator actionability.
 
-## V5.3 Scope
+## Judge-Relevant Version History
 
-Mission Control is now implemented as a visible pass/review/block gate board. Version 5.3 adds deterministic facility candidate-window ordering, lead-anchor citation gating, NFHS/density provenance rows, lead-entity trust-review alignment, and optional MLflow tracing hooks. The optional population reference remains planned, not active, so the provided Virtue Foundation tables remain the primary decision source.
+| Version | What changed | Judge value |
+|---|---|---|
+| `v5.4` current | Added the cached facility entity-index table with source-row fingerprints and runtime fallback. | Faster Trust Desk resolution, safer handling of dataset updates, and a stable v5.4 demo path without adding Spark Declarative Pipelines or Vector Search as critical-path dependencies. |
+| `v5.3` validated baseline | Added deterministic facility ordering, lead-anchor citation gating, NFHS and density provenance, trust-review alignment, Lakebase readback, and native MLflow evaluation. | Proved the Mission Control workflow was evidence-grounded, persistent, and evaluation-backed before the v5.4 speed/stability optimization. |
+| Earlier MVP | Established the Track 3 Referral Copilot flow, map, shortlist action, and first Databricks App/Lakebase path. | Created the non-technical workflow that later versions hardened with evidence, uncertainty, and validation gates. |
 
-## Version History
+## Databricks Resources
 
-- `v2.0` - Added Trust Desk with facility cleaning, entity resolution, website verification, and trust-supported referral planning.
-- `v2.1` - Added the stage-based UI, canonical entity ranking improvements, KPI fixes, and safer missing-website handling.
-- `v2.2` - Reframed the app as a referral copilot and fixed live-app layout clipping around post-run output.
-- `v3.0` - Added the Convoy Review Board with separate gates for need, facility fit, trust, evidence, strategy, and supervisor review.
-- `v4.0` - Verified the live Databricks App path and hardened the provided-dataset reads for NFHS and facility-density context.
-- `v5.0` - Planned the multi-agent referral flow with a team-of-agents pattern.
-- `v5.1` - Rebuilt the Streamlit app around the updated demo skills and deployed the Mission Control experience.
-- `v5.2` - Added short-copy design guidance, bullet-led content, visible pass/review/block mission packets, and v5.2 deployment validation.
-- `v5.3` - Fixed release-eval blockers around facility ranking, lead citations, district provenance, trust alignment, MLflow tracing, hosted readback, and native MLflow evaluation.
+- **App:** Databricks Apps with Streamlit.
+- **Governed data:** Unity Catalog tables from the provided Virtue Foundation dataset.
+- **Query path:** Databricks SQL Warehouse.
+- **Persistence:** Lakebase shortlist store.
+- **LLM path:** Databricks Model Serving endpoint when configured, deterministic fallback when unavailable.
+- **Observability:** MLflow tracing hooks and GenAI evaluation.
+
+## Acknowledgements
+
+Care Convoy was built during the hackathon period with original application code. See `AGENTS.md` for local development workflow and agent/skill reference details.
 
 ## Demo Payoff
 
-Care Convoy does not just map need or list hospitals. It turns messy facility and district evidence into a cautious, cited, saveable referral decision for an operations lead.
+Care Convoy does not just map need or list hospitals. It turns imperfect facility and district evidence into a cautious, cited, saveable referral decision for an operations lead.

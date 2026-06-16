@@ -35,7 +35,50 @@ CONFIDENCE_OPTIONS = {
     "High Confidence": 0.75,
 }
 
+ALL_STATES_LABEL = "All India"
+ALL_DISTRICTS_LABEL = "All districts"
+
+INDIA_STATE_OPTIONS = [
+    "Andaman and Nicobar Islands",
+    "Andhra Pradesh",
+    "Arunachal Pradesh",
+    "Assam",
+    "Bihar",
+    "Chandigarh",
+    "Chhattisgarh",
+    "Dadra and Nagar Haveli and Daman and Diu",
+    "Delhi",
+    "Goa",
+    "Gujarat",
+    "Haryana",
+    "Himachal Pradesh",
+    "Jammu and Kashmir",
+    "Jharkhand",
+    "Karnataka",
+    "Kerala",
+    "Ladakh",
+    "Lakshadweep",
+    "Madhya Pradesh",
+    "Maharashtra",
+    "Manipur",
+    "Meghalaya",
+    "Mizoram",
+    "Nagaland",
+    "Odisha",
+    "Puducherry",
+    "Punjab",
+    "Rajasthan",
+    "Sikkim",
+    "Tamil Nadu",
+    "Telangana",
+    "Tripura",
+    "Uttar Pradesh",
+    "Uttarakhand",
+    "West Bengal",
+]
+
 STAGE_VIEWS = ["Map + Packet", "Mission Control", "Anchor Review", "Trust Evidence", "Shortlist"]
+INTRO_TABS = ["How To Use", "Pipeline", "Evidence", "Demo"]
 
 GATE_LABELS = {
     "pass": "Pass",
@@ -114,11 +157,12 @@ def _hero() -> None:
         title="Care Convoy Mission Control",
         subtitle="Plan the next referral move. Check need, supply, trust, and evidence. Save only after review.",
         chips=[
+            ("Author", "Pingying Chen"),
+            ("Co-author", "Zihang Liang"),
             ("User", "Virtue operations lead"),
             ("Decision", "Next referral move"),
             ("Mode", "Pass / review / block"),
             ("Save", "Lakebase shortlist"),
-            ("Population", "Planned, not active"),
         ],
     )
 
@@ -172,6 +216,384 @@ def _result_status_messages(result: dict[str, Any]) -> list[tuple[str, str]]:
         messages.append(("info", f"Brief: {result['summary_source']}"))
     messages.extend(("warn", _short_status(warning)) for warning in result["warnings"])
     return messages
+
+
+def _clean_option_values(values: Any) -> list[str]:
+    cleaned = [str(value).strip() for value in values if str(value or "").strip()]
+    return sorted(dict.fromkeys(cleaned))
+
+
+def _scope_rows_from_results(*results: dict[str, Any] | None) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    for result in results:
+        if not result:
+            continue
+        districts = result.get("districts")
+        if not isinstance(districts, pd.DataFrame) or districts.empty:
+            continue
+        if not {"state", "district"}.issubset(districts.columns):
+            continue
+        frames.append(districts[["state", "district"]].copy())
+
+    if not frames:
+        return pd.DataFrame(columns=["state", "district"])
+    rows = pd.concat(frames, ignore_index=True).dropna(how="all")
+    rows["state"] = rows["state"].astype(str).str.strip()
+    rows["district"] = rows["district"].astype(str).str.strip()
+    return rows[(rows["state"] != "") | (rows["district"] != "")]
+
+
+def _state_options(*results: dict[str, Any] | None) -> list[str]:
+    scope_rows = _scope_rows_from_results(*results)
+    data_states = _clean_option_values(scope_rows["state"]) if not scope_rows.empty else []
+    states = sorted(dict.fromkeys([*INDIA_STATE_OPTIONS, *data_states]))
+    return [ALL_STATES_LABEL, *states]
+
+
+def _district_options(state_focus: str, *results: dict[str, Any] | None) -> list[str]:
+    scope_rows = _scope_rows_from_results(*results)
+    if scope_rows.empty:
+        return [ALL_DISTRICTS_LABEL]
+
+    if state_focus and state_focus != ALL_STATES_LABEL:
+        scope_rows = scope_rows[scope_rows["state"].str.casefold() == state_focus.casefold()]
+
+    districts = _clean_option_values(scope_rows["district"])
+    return [ALL_DISTRICTS_LABEL, *districts]
+
+
+def _state_filter_value(state_focus: str) -> str:
+    return "" if state_focus == ALL_STATES_LABEL else state_focus.strip()
+
+
+def _district_filter_value(district_focus: str) -> str:
+    return "" if district_focus == ALL_DISTRICTS_LABEL else district_focus.strip()
+
+
+def _run_plan(
+    mission_key: str,
+    state_focus: str,
+    district_focus: str,
+    confidence_label: str,
+) -> dict[str, Any]:
+    return run_agent(
+        mission_type=mission_key,
+        mission_label=MISSION_OPTIONS[mission_key],
+        state_filter=_state_filter_value(state_focus),
+        district_filter=_district_filter_value(district_focus),
+        confidence_threshold=CONFIDENCE_OPTIONS[confidence_label],
+        run_id=str(uuid.uuid4()),
+    )
+
+
+def _ensure_national_result() -> None:
+    if st.session_state.get("national_scan_done"):
+        return
+
+    try:
+        with st.spinner("Loading the India-wide alert..."):
+            st.session_state.national_result = _run_plan(
+                mission_key="maternal_health",
+                state_focus=ALL_STATES_LABEL,
+                district_focus=ALL_DISTRICTS_LABEL,
+                confidence_label="Weak Evidence",
+            )
+            if st.session_state.latest_result is None:
+                st.session_state.latest_result = st.session_state.national_result
+    except Exception as exc:
+        st.session_state.national_error = str(exc)
+    finally:
+        st.session_state.national_scan_done = True
+
+
+def _render_page_jump() -> None:
+    active_page = str(st.session_state.get("app_page", "Live Demo"))
+    _, right = st.columns([0.72, 0.28], gap="large")
+    with right:
+        label = "Back To Live Demo" if active_page == "Introduction" else "Open App Introduction"
+        if st.button(label, use_container_width=True):
+            st.session_state.app_page = "Live Demo" if active_page == "Introduction" else "Introduction"
+            st.rerun()
+
+
+def _render_top_controls() -> tuple[str, str, str, str, bool]:
+    national_result = st.session_state.get("national_result")
+    latest_result = st.session_state.get("latest_result")
+    state_options = _state_options(national_result, latest_result)
+    if st.session_state.state_focus not in state_options:
+        st.session_state.state_focus = ALL_STATES_LABEL
+
+    district_options = _district_options(st.session_state.state_focus, national_result, latest_result)
+    if st.session_state.district_focus not in district_options:
+        st.session_state.district_focus = ALL_DISTRICTS_LABEL
+
+    st.markdown(
+        (
+            "<section class='db-control-copy'>"
+            "<div class='db-section-label'>Mission setup</div>"
+            "<p>Start with the India-wide alert, then narrow the referral plan only when a judge asks about a place.</p>"
+            "</section>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+    cols = st.columns([1.1, 1, 1, 1, 0.92, 0.72], gap="medium")
+    with cols[0]:
+        mission_key = st.selectbox("Care need", list(MISSION_OPTIONS), format_func=MISSION_OPTIONS.get, key="mission_key")
+    with cols[1]:
+        state_focus = st.selectbox("State", state_options, key="state_focus")
+    with cols[2]:
+        district_options = _district_options(state_focus, national_result, latest_result)
+        if st.session_state.district_focus not in district_options:
+            st.session_state.district_focus = ALL_DISTRICTS_LABEL
+        district_focus = st.selectbox("District", district_options, key="district_focus")
+    with cols[3]:
+        confidence_label = st.select_slider("Minimum certainty", options=list(CONFIDENCE_OPTIONS), key="confidence_label")
+    with cols[4]:
+        st.write("")
+        run_button = st.button("Build Referral Plan", type="primary", use_container_width=True)
+    with cols[5]:
+        st.write("")
+        clear_button = st.button("Clear", use_container_width=True)
+
+    if clear_button:
+        st.session_state.mission_key = "maternal_health"
+        st.session_state.state_focus = ALL_STATES_LABEL
+        st.session_state.district_focus = ALL_DISTRICTS_LABEL
+        st.session_state.confidence_label = "Weak Evidence"
+        st.session_state.latest_result = st.session_state.get("national_result")
+        st.rerun()
+
+    lakebase = lakebase_status()
+    filter_pills(
+        [
+            ("Active need", MISSION_OPTIONS[str(mission_key)]),
+            ("Active state", state_focus),
+            ("Active district", district_focus),
+            ("Shortlist", "Lakebase" if lakebase_available() else "Not configured"),
+        ]
+    )
+    with st.popover("How To Use"):
+        st.markdown(
+            "- Read the India-wide alert first.\n"
+            "- Use State and District only when narrowing the story.\n"
+            "- Click **Build Referral Plan** to re-rank the map and packet.\n"
+            "- Open **Mission Control** to see why the app says save, verify, or hold.\n"
+            "- Save from **Shortlist** only after reviewing trust evidence."
+        )
+        st.caption(lakebase["detail"])
+
+    return mission_key, state_focus, district_focus, confidence_label, run_button
+
+
+def _show_national_alert(result: dict[str, Any] | None) -> None:
+    if result is None:
+        message = escape(st.session_state.get("national_error", "The India-wide scan is still loading."))
+        st.markdown(
+            (
+                "<section class='db-alert-strip'>"
+                "<div><div class='db-alert-kicker'>Most important India alert</div>"
+                "<h2>National scan unavailable</h2>"
+                f"<p>{message}</p></div>"
+                "</section>"
+            ),
+            unsafe_allow_html=True,
+        )
+        return
+
+    packet = result.get("mission_packet", {})
+    trace = result.get("mission_control_trace", [])
+    gate_counts = _gate_counts(trace)
+    lead_district = str(packet.get("lead_district", "No district"))
+    lead_state = str(packet.get("lead_state", ""))
+    action = str(packet.get("action_state", "verify first")).title()
+    warning = _short_status(result["warnings"][0]) if result.get("warnings") else "No blocking warning in the national scan."
+    next_action = str(packet.get("next_verification_action", "Review the packet before saving."))
+    lead_anchor = str(packet.get("lead_anchor", "No lead anchor"))
+    confidence = str(packet.get("confidence", result.get("confidence_label", "Weak Evidence")))
+    citation_status = str(packet.get("citation_status", "unknown"))
+    location = f"{lead_district}, {lead_state}".strip().strip(",")
+
+    alert_items = [
+        f"Start with {location} for {result['mission_label']}.",
+        warning,
+        next_action,
+    ]
+    list_html = "".join(f"<li>{escape(item)}</li>" for item in alert_items if item)
+    stat_html = "".join(
+        (
+            "<div class='db-alert-stat'>"
+            f"<span>{escape(label)}</span>"
+            f"<strong>{escape(value)}</strong>"
+            "</div>"
+        )
+        for label, value in [
+            ("Action", action),
+            ("Lead anchor", lead_anchor),
+            ("Confidence", confidence),
+            ("Gates", f"{gate_counts['pass']} pass · {gate_counts['review']} review · {gate_counts['block']} block"),
+            ("Citations", citation_status),
+        ]
+    )
+
+    st.markdown(
+        (
+            "<section class='db-alert-strip'>"
+            "<div class='db-alert-main'>"
+            "<div class='db-alert-kicker'>Most important India alert</div>"
+            f"<h2>{escape(action)}: {escape(location)}</h2>"
+            f"<ul>{list_html}</ul>"
+            "</div>"
+            f"<div class='db-alert-stats'>{stat_html}</div>"
+            "</section>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _show_intro_page(national_result: dict[str, Any] | None) -> None:
+    st.markdown(
+        (
+            "<section class='db-intro-hero'>"
+            "<div class='db-alert-kicker'>In-app introduction</div>"
+            "<h2>Care Convoy helps an operations lead choose the next referral move.</h2>"
+            "<p>The demo starts with an India-wide alert, then shows how evidence, uncertainty, trust checks, and persistence turn messy facility data into a cautious action.</p>"
+            "</section>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+    tabs = st.tabs(INTRO_TABS)
+
+    with tabs[0]:
+        action_panel(
+            "How a non-technical user should use the app",
+            "Follow this order during the judge conversation.",
+            [
+                "Read the India-wide alert first.",
+                "Use State and District only if the judge asks to narrow the map.",
+                "Click Build Referral Plan to re-rank districts and facility anchors.",
+                "Open Mission Control to see pass, review, and block gates.",
+                "Open Trust Evidence before saving any shortlist item.",
+            ],
+        )
+        card_grid(
+            [
+                {
+                    "title": "Map + Packet",
+                    "body": "Shows the priority district, lead anchor, backup anchor, next action, and cited cautions.",
+                    "caption": "Use it as the first live demo screen.",
+                },
+                {
+                    "title": "Mission Control",
+                    "body": "Shows seven agent gates so judges can see why the plan says shortlist, verify first, or hold.",
+                    "caption": "This is the trust moment.",
+                },
+                {
+                    "title": "Anchor Review",
+                    "body": "Compares facility candidates by fit, trust, confidence, and evidence rows.",
+                    "caption": "Use it when judges ask why this facility.",
+                },
+                {
+                    "title": "Shortlist",
+                    "body": "Saves a decision and verification note through Lakebase so action persists after interaction.",
+                    "caption": "This proves the app is operational.",
+                },
+            ],
+            columns=4,
+        )
+
+    with tabs[1]:
+        steps = [
+            ("1", "Provided data", "Facilities, NFHS district health indicators, and India pincode geography are read from the Virtue Foundation catalog."),
+            ("2", "Need and supply", "NFHS signals and facility density identify where need is high and supply evidence is thin."),
+            ("3", "Trust and evidence", "Facility anchors are checked for fit, duplicate risk, website status, source URLs, and claim citations."),
+            ("4", "Mission Control", "Seven gates convert evidence into shortlist, verify-first, or hold guidance."),
+            ("5", "Persistence", "The chosen packet, gate trace, facility, district, and note are saved to Lakebase."),
+        ]
+        step_html = "".join(
+            (
+                "<section class='db-pipeline-step'>"
+                f"<span>{escape(number)}</span>"
+                f"<div><strong>{escape(title)}</strong><p>{escape(body)}</p></div>"
+                "</section>"
+            )
+            for number, title, body in steps
+        )
+        st.markdown(f"<div class='db-pipeline'>{step_html}</div>", unsafe_allow_html=True)
+        action_panel(
+            "What the pipeline is not claiming",
+            "The demo is intentionally honest about scope.",
+            [
+                "No travel-time routing denominator is active.",
+                "Population context is planned, not used for ranking.",
+                "Weak source evidence is downgraded instead of hidden.",
+                "The provided facility dataset remains the source of truth.",
+            ],
+        )
+
+    with tabs[2]:
+        if national_result:
+            packet = national_result.get("mission_packet", {})
+            card_grid(
+                [
+                    {
+                        "title": "Current national action",
+                        "body": str(packet.get("action_state", "review")).title(),
+                        "caption": str(packet.get("next_verification_action", "Review before saving.")),
+                    },
+                    {
+                        "title": "Citation status",
+                        "body": str(packet.get("citation_status", "unknown")),
+                        "caption": "Recommendation claims are qualified when citation rows are missing.",
+                    },
+                    {
+                        "title": "Uncertainty label",
+                        "body": str(packet.get("confidence", national_result.get("confidence_label", "Weak Evidence"))),
+                        "caption": "Weak evidence appears as a product signal, not a hidden caveat.",
+                    },
+                ],
+                columns=3,
+            )
+        bullet_card(
+            "Evidence surfaces in the app",
+            [
+                "District context cites NFHS and facility-density provenance.",
+                "Facility claims show source URL rows when available.",
+                "Trust Evidence shows website status and duplicate-review flags.",
+                "Mission Control explains which gate caused a review or hold.",
+            ],
+            "Judges can inspect evidence without reading code.",
+        )
+
+    with tabs[3]:
+        action_panel(
+            "Three-minute judge path",
+            "Lead with the workflow, then prove the build.",
+            [
+                "0:00 - Name Track 3 Referral Copilot and show the India alert.",
+                "0:25 - Build or refresh one referral plan.",
+                "1:05 - Open Mission Control and explain the weakest gate.",
+                "1:45 - Open Trust Evidence for citations and uncertainty.",
+                "2:20 - Save a shortlist decision with a note.",
+                "2:45 - Close on Databricks Apps, Unity Catalog, Lakebase, and MLflow evaluation.",
+            ],
+        )
+        card_grid(
+            [
+                {
+                    "title": "Author",
+                    "body": "Pingying Chen",
+                    "caption": "Care Convoy submission.",
+                },
+                {
+                    "title": "Co-author",
+                    "body": "Zihang Liang",
+                    "caption": "Care Convoy submission.",
+                },
+            ],
+            columns=2,
+        )
 
 
 def _gate_counts(trace: list[dict[str, str]]) -> dict[str, int]:
@@ -317,17 +739,33 @@ def _show_overview(result: dict[str, Any]) -> None:
     top_district = districts.iloc[0] if not districts.empty else None
     top_facility = facilities.iloc[0] if not facilities.empty else None
     top_trust_review = trust_reviews.iloc[0] if trust_reviews is not None and not trust_reviews.empty else None
+    packet = result.get("mission_packet", {})
 
-    left, right = st.columns([1.6, 1], gap="large")
+    left, right = st.columns(2, gap="large")
     with left:
-        render_map(districts, facilities, height=430)
+        render_map(districts, facilities, height=405)
         st.markdown(
             "<p class='db-map-caption'>District points show demand context; facility points show anchors being reviewed for credibility.</p>",
             unsafe_allow_html=True,
         )
+        if top_district is not None:
+            district_caption = top_district["uncertainty_label"]
+            density_context = str(top_district.get("facility_density_context", "") or "")
+            nfhs_summary = str(top_district.get("nfhs_need_summary", "") or "")
+            if density_context:
+                district_caption = f"{district_caption}. {_shorten(density_context, 90)}"
+            bullet_card(
+                f"Highest-need district: {top_district['district']}, {top_district['state']}",
+                [
+                    f"Need score: {top_district['need_score']:.1f}",
+                    f"Coverage gap: {top_district['coverage_gap']:.1f}",
+                    f"Evidence score: {top_district['evidence_score']:.1f}",
+                    _shorten(nfhs_summary, 92),
+                ],
+                district_caption,
+            )
 
     with right:
-        packet = result.get("mission_packet", {})
         bullet_card("Mission packet", _bullet_items(result["summary"]), _short_status(result["provenance"]))
         inline_metrics(
             [
@@ -361,22 +799,13 @@ def _show_overview(result: dict[str, Any]) -> None:
                 ],
                 "Review before saving.",
             )
-        if top_district is not None:
-            district_caption = top_district["uncertainty_label"]
-            density_context = str(top_district.get("facility_density_context", "") or "")
-            nfhs_summary = str(top_district.get("nfhs_need_summary", "") or "")
-            if density_context:
-                district_caption = f"{district_caption}. {_shorten(density_context, 90)}"
-            bullet_card(
-                f"Highest-need district context: {top_district['district']}, {top_district['state']}",
-                [
-                    f"Need: {top_district['need_score']:.1f}",
-                    f"Coverage gap: {top_district['coverage_gap']:.1f}",
-                    f"Evidence: {top_district['evidence_score']:.1f}",
-                    _shorten(nfhs_summary, 92),
-                ],
-                district_caption,
-            )
+        status_stack(_result_status_messages(result)[:2])
+
+    if packet:
+        card_grid(_mission_packet_items(packet), columns=4)
+
+    bottom_left, bottom_right = st.columns(2, gap="large")
+    with bottom_left:
         action_panel(
             "What to do next",
             "Review in this order.",
@@ -387,9 +816,8 @@ def _show_overview(result: dict[str, Any]) -> None:
                 "Save only after verification.",
             ],
         )
-        status_stack(_result_status_messages(result))
-        if packet:
-            card_grid(_mission_packet_items(packet), columns=1)
+    with bottom_right:
+        status_stack(_result_status_messages(result)[2:5])
 
 
 def _show_review_board(result: dict[str, Any]) -> None:
@@ -713,54 +1141,42 @@ def _render_stage(view: str, result: dict[str, Any]) -> None:
         _show_shortlist(result)
 
 
-st.set_page_config(page_title="Care Convoy", layout="wide")
+st.set_page_config(page_title="Care Convoy", layout="wide", initial_sidebar_state="collapsed")
 inject_theme()
 
-_hero()
-
 st.session_state.setdefault("latest_result", None)
+st.session_state.setdefault("national_result", None)
+st.session_state.setdefault("national_error", "")
+st.session_state.setdefault("national_scan_done", False)
+st.session_state.setdefault("app_page", "Live Demo")
 st.session_state.setdefault("mission_key", "maternal_health")
-st.session_state.setdefault("state_focus", "Maharashtra")
-st.session_state.setdefault("district_focus", "")
+st.session_state.setdefault("state_focus", ALL_STATES_LABEL)
+st.session_state.setdefault("district_focus", ALL_DISTRICTS_LABEL)
 st.session_state.setdefault("confidence_label", "Weak Evidence")
 
-with st.sidebar:
-    st.subheader("Mission Setup")
-    filter_pills(
-        [
-            ("Need", MISSION_OPTIONS[str(st.session_state.mission_key)]),
-            ("State", str(st.session_state.state_focus) or "India"),
-            ("Certainty", str(st.session_state.confidence_label)),
-        ]
-    )
-    if st.button("Clear filters", use_container_width=True):
-        st.session_state.mission_key = "maternal_health"
-        st.session_state.state_focus = "Maharashtra"
-        st.session_state.district_focus = ""
-        st.session_state.confidence_label = "Weak Evidence"
-        st.session_state.latest_result = None
-        st.rerun()
-    mission_key = st.selectbox("Care need", list(MISSION_OPTIONS), format_func=MISSION_OPTIONS.get, key="mission_key")
-    state_filter = st.text_input("State focus", key="state_focus")
-    district_filter = st.text_input("District focus", key="district_focus")
-    confidence_label = st.select_slider("Minimum certainty", options=list(CONFIDENCE_OPTIONS), key="confidence_label")
-    run_button = st.button("Build Referral Plan", type="primary", use_container_width=True)
-    lakebase = lakebase_status()
-    st.caption("Shortlist mode: Lakebase" if lakebase_available() else "Shortlist mode: Lakebase not configured yet")
-    st.caption(lakebase["detail"])
+if st.session_state.get("control_surface_version") != "top-controls-v1":
+    st.session_state.control_surface_version = "top-controls-v1"
+    st.session_state.state_focus = ALL_STATES_LABEL
+    st.session_state.district_focus = ALL_DISTRICTS_LABEL
+    st.session_state.confidence_label = "Weak Evidence"
+
+_hero()
+_render_page_jump()
+_ensure_national_result()
+
+if st.session_state.app_page == "Introduction":
+    _show_intro_page(st.session_state.get("national_result"))
+    st.stop()
+
+mission_key, state_focus, district_focus, confidence_label, run_button = _render_top_controls()
 
 if run_button:
     with st.spinner("Running agent gates..."):
-        st.session_state.latest_result = run_agent(
-            mission_type=mission_key,
-            mission_label=MISSION_OPTIONS[mission_key],
-            state_filter=state_filter.strip(),
-            district_filter=district_filter.strip(),
-            confidence_threshold=CONFIDENCE_OPTIONS[confidence_label],
-            run_id=str(uuid.uuid4()),
-        )
+        st.session_state.latest_result = _run_plan(mission_key, state_focus, district_focus, confidence_label)
 
-result = st.session_state.latest_result
+_show_national_alert(st.session_state.get("national_result"))
+
+result = st.session_state.latest_result or st.session_state.get("national_result")
 _summary_metrics(result)
 
 if result is None:
