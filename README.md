@@ -4,7 +4,7 @@ Care Convoy is a decision-support app for global-health referral planning in Ind
 
 Instead of presenting a single opaque score, Care Convoy produces a saveable referral mission packet with cited evidence, uncertainty labels, duplicate and website trust checks, and a clear next action: shortlist, verify first, or hold.
 
-The app is built for non-technical users who need a practical answer: which district should be prioritized, which facility can anchor referrals, what evidence supports that choice, and what still needs verification.
+The v6 app layout is built for non-technical users first: the home screen leads with the recommended next move, then lets the user inspect why that recommendation is cautious, what evidence supports it, and how to save a verification note. A separate **For Judges** page gives a one-click backend and validation walkthrough without crowding the operator workflow.
 
 **Hackathon note:** Care Convoy was built for the Databricks Data for Good Hackathon using the provided Virtue Foundation facility dataset, NFHS district indicators, and India pincode directory.
 
@@ -19,9 +19,9 @@ From here, the README is judge-facing: it maps the project to the hackathon trac
 
 | Judging criterion | What Care Convoy proves | Where to look in the demo |
 |---|---|---|
-| Product judgment | A non-technical operations lead can choose a district, referral anchor, and verification action in minutes. | Mission setup, Map + Packet, Shortlist |
-| Evidence and uncertainty | Rankings, facility fit, NFHS context, trust labels, and recommendations show citations or warnings instead of hiding weak evidence. | Trust Evidence, Anchor Review, Mission Control |
-| Technical execution | Runs as a Databricks App using Unity Catalog, SQL Warehouse, a cached entity-index table, Lakebase, Model Serving hooks, MLflow evaluation, Streamlit, pandas, Plotly, and PyDeck. | Live app, Validation Status, Pipeline View |
+| Product judgment | A non-technical operations lead can choose a district, referral anchor, and verification action in minutes. | Plan, Why This Place, Save Decision |
+| Evidence and uncertainty | Rankings, facility fit, NFHS context, trust labels, and recommendations show citations or warnings instead of hiding weak evidence. | Evidence Check, Compare Anchors, Why This Place |
+| Technical execution | Runs as a Databricks App using Unity Catalog, SQL Warehouse, a cached entity-index table, Lakebase, Model Serving hooks, MLflow evaluation, Streamlit, pandas, Plotly, and PyDeck. | For Judges, Architecture, Validation |
 | Ambition | The app does not stop at a map or a list. It uses seven decision gates to decide whether to shortlist, verify first, or hold. | Decision gates |
 
 **Best judge takeaway:** Care Convoy turns messy healthcare facility data into an evidence-backed, uncertainty-aware, persistent referral decision.
@@ -38,10 +38,11 @@ From here, the README is judge-facing: it maps the project to the hackathon trac
       <p><strong>Status:</strong> add the final Devpost, YouTube, or Loom link here before submission.</p>
       <ul>
         <li>0:00 - name Track 3 Referral Copilot.</li>
-        <li>0:20 - build one referral plan.</li>
-        <li>1:10 - show citations and uncertainty gates.</li>
-        <li>2:10 - save the shortlist decision.</li>
-        <li>2:40 - close with Databricks resources and validation.</li>
+        <li>0:20 - show the recommended next move.</li>
+        <li>1:10 - open Why This Place for the weakest gate.</li>
+        <li>1:45 - open Evidence Check for citations and uncertainty.</li>
+        <li>2:20 - save the shortlist decision.</li>
+        <li>2:45 - open For Judges for Databricks resources and validation.</li>
       </ul>
     </td>
   </tr>
@@ -53,9 +54,10 @@ From here, the README is judge-facing: it maps the project to the hackathon trac
 2. Filter by state, district, and minimum certainty when the operator wants a narrower run.
 3. Click **Build Referral Plan**.
 4. Review the priority district, map, referral anchor, backup anchor, confidence, warnings, and cited evidence.
-5. Open **Mission Control** to see pass, review, or block gates for need, supply density, facility fit, trust, evidence, strategy, and supervisor action.
-6. Open **Trust Evidence** to inspect duplicate resolution, website verification, source URLs, and weak-evidence flags.
+5. Open **Why This Place** to see pass, review, or block gates for need, supply density, facility fit, trust, evidence, strategy, and supervisor action.
+6. Open **Evidence Check** to inspect duplicate resolution, website verification, source URLs, and weak-evidence flags.
 7. Save a shortlist decision with a verification note so the recommendation becomes durable operational state.
+8. Open **For Judges** to review the app-led pitch path, backend architecture, evidence surfaces, validation status, and explicit non-claims.
 
 <details open>
 <summary><strong>Interactive judge walkthrough</strong></summary>
@@ -64,7 +66,8 @@ From here, the README is judge-facing: it maps the project to the hackathon trac
 |---|---|---|
 | Decide | "Where should the next team go?" | A ranked district and lead referral anchor, not a raw table. |
 | Trust | "Can I believe this facility claim?" | Citation rows, website status, duplicate risk, source URL gaps, and confidence labels. |
-| Act | "What should the operator do next?" | Shortlist, verify-first, or hold action from Mission Control, then a Lakebase-saved decision. |
+| Act | "What should the operator do next?" | Shortlist, verify-first, or hold action from the gate trace, then a Lakebase-saved decision. |
+| Prove | "What did you build on Databricks?" | The For Judges page shows the architecture, evidence model, validation summary, and scoped non-claims. |
 
 </details>
 
@@ -80,6 +83,8 @@ From here, the README is judge-facing: it maps the project to the hackathon trac
 - **Validate the workflow:** use MLflow evaluation checks for evidence grounding and operator actionability.
 
 ## Backend Pipeline
+
+In the live app, this backend story lives behind **For Judges** so the operator home can stay focused on the referral decision.
 
 ```mermaid
 flowchart LR
@@ -203,8 +208,11 @@ The backend is designed as a staged evidence pipeline rather than a single ranki
 ## Validation Status
 
 - Databricks App is `RUNNING`.
-- Hosted UI validation saved a shortlist item and Lakebase readback confirmed the saved decision reloaded.
-- Local deterministic tests passed: `50 passed`.
+- V6 Databricks App deployment succeeded and Streamlit started from `src/app.py`.
+- V6 layout validation rendered the operator home and `For Judges` page at 1280x720.
+- Final v6 authenticated hosted replay is still pending before calling the app demo-ready.
+- Earlier hosted UI validation saved a shortlist item and Lakebase readback confirmed the saved decision reloaded.
+- Local deterministic tests passed after the v6 UX slice: `51 passed`.
 - Python syntax compilation passed.
 - Dependency audit returned no known vulnerabilities.
 - Live Databricks checks confirmed all three provided tables are populated.

@@ -139,4 +139,4 @@ def render_map(districts: pd.DataFrame, facilities: pd.DataFrame, height: int = 
         layers=layers,
         tooltip={"html": "<b>{label}</b><br/>{kind}<br/>{region}", "style": {"fontFamily": "sans-serif"}},
     )
-    st.pydeck_chart(deck, use_container_width=True)
+    st.pydeck_chart(deck, width="stretch")

@@ -12,12 +12,27 @@ def test_app_initial_render_is_stable() -> None:
 
     assert not app.exception
     assert any(button.label == "Build Referral Plan" for button in app.button)
-    assert any(button.label == "Open App Introduction" for button in app.button)
+    assert any(button.label == "For Judges" for button in app.button)
     assert any(selectbox.label == "State" for selectbox in app.selectbox)
     assert any(selectbox.label == "District" for selectbox in app.selectbox)
     rendered_markdown = "\n".join(markdown.value for markdown in app.markdown)
-    assert "v5.3 Mission Control" in rendered_markdown
-    assert "Most important India alert" in rendered_markdown
+    assert "v6 operator view" in rendered_markdown
+    assert "Recommended next move" in rendered_markdown
+    assert "Current question" in rendered_markdown
+
+
+def test_judge_proof_room_renders_from_operator_home() -> None:
+    app = AppTest.from_file("src/app.py")
+
+    app.run(timeout=20)
+    next(button for button in app.button if button.label == "For Judges").click()
+    app.run(timeout=20)
+
+    assert not app.exception
+    assert any(button.label == "Back To Operator Demo" for button in app.button)
+    rendered_markdown = "\n".join(markdown.value for markdown in app.markdown)
+    assert "Interactive proof room for the backend story" in rendered_markdown
+    assert "Three-minute app-led pitch" in rendered_markdown
 
 
 def test_decision_options_follow_mission_packet_action() -> None:

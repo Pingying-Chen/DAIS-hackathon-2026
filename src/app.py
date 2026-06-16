@@ -77,8 +77,10 @@ INDIA_STATE_OPTIONS = [
     "West Bengal",
 ]
 
-STAGE_VIEWS = ["Map + Packet", "Mission Control", "Anchor Review", "Trust Evidence", "Shortlist"]
-INTRO_TABS = ["How To Use", "Pipeline", "Evidence", "Demo"]
+APP_PAGE_LIVE = "Operator Demo"
+APP_PAGE_JUDGES = "Judge Proof"
+STAGE_VIEWS = ["Plan", "Why This Place", "Compare Anchors", "Evidence Check", "Save Decision"]
+INTRO_TABS = ["Demo Path", "Architecture", "Evidence", "Validation"]
 
 GATE_LABELS = {
     "pass": "Pass",
@@ -153,16 +155,14 @@ def _short_status(message: str) -> str:
 
 def _hero() -> None:
     hero_header(
-        eyebrow="Track 3 Referral Copilot · v5.3 Mission Control",
-        title="Care Convoy Mission Control",
-        subtitle="Plan the next referral move. Check need, supply, trust, and evidence. Save only after review.",
+        eyebrow="Track 3 Referral Copilot · v6 operator view",
+        title="Care Convoy",
+        subtitle="Choose the next referral move in India. See the reason, the evidence, and the action before saving a decision.",
         chips=[
-            ("Author", "Pingying Chen"),
-            ("Co-author", "Zihang Liang"),
-            ("User", "Virtue operations lead"),
-            ("Decision", "Next referral move"),
-            ("Mode", "Pass / review / block"),
-            ("Save", "Lakebase shortlist"),
+            ("For", "Virtue operations lead"),
+            ("Question", "Where should the team go?"),
+            ("Rule", "Cited or downgraded"),
+            ("Action", "Save verification note"),
         ],
     )
 
@@ -170,10 +170,10 @@ def _hero() -> None:
 def _summary_metrics(result: dict[str, Any] | None) -> None:
     if result is None:
         items = [
-            {"label": "Mission Control", "value": "Ready", "value_class": "db-kpi-accent", "note": "Choose care need. Run plan."},
-            {"label": "Track", "value": "3", "note": "Referral Copilot. Trust support."},
-            {"label": "Data Path", "value": "Virtue", "note": "Facilities. NFHS. Pincodes."},
-            {"label": "Persistence", "value": "Lakebase", "note": "Saved decisions reload."},
+            {"label": "Operator View", "value": "Ready", "value_class": "db-kpi-accent", "note": "Start with the national recommendation."},
+            {"label": "Track", "value": "3", "note": "Referral Copilot."},
+            {"label": "Evidence", "value": "Required", "note": "Weak claims are downgraded."},
+            {"label": "Saved Action", "value": "Lakebase", "note": "Shortlist decisions reload."},
         ]
     else:
         trust_reviews = result.get("trust_reviews")
@@ -184,11 +184,11 @@ def _summary_metrics(result: dict[str, Any] | None) -> None:
         trace = result.get("mission_control_trace", [])
         gate_counts = _gate_counts(trace)
         items = [
-            {"label": "Packet Action", "value": str(packet.get("action_state", "review")).title(), "value_class": "db-kpi-accent", "note": "Weakest gate decides."},
-            {"label": "Gate Mix", "value": f"{gate_counts['pass']}/{gate_counts['review']}/{gate_counts['block']}", "note": "Pass / review / block."},
-            {"label": "Priority Districts", "value": str(len(result["districts"])), "note": "Live district rows."},
-            {"label": "Candidate Anchors", "value": str(len(result["facilities"])), "note": "Ranked facilities."},
-            {"label": "Verified Websites", "value": str(verified_count), "note": "Trust support signal."},
+            {"label": "Recommended Action", "value": str(packet.get("action_state", "review")).title(), "value_class": "db-kpi-accent", "note": "Weakest gate decides."},
+            {"label": "Safety Gates", "value": f"{gate_counts['pass']}/{gate_counts['review']}/{gate_counts['block']}", "note": "Pass / review / block."},
+            {"label": "Places Checked", "value": str(len(result["districts"])), "note": "Priority districts."},
+            {"label": "Facility Options", "value": str(len(result["facilities"])), "note": "Ranked anchors."},
+            {"label": "Websites Verified", "value": str(verified_count), "note": "Trust support signal."},
         ]
     kpi_row(items)
 
@@ -197,9 +197,9 @@ def _show_empty_state() -> None:
     card_grid(
         [
             {
-                "title": "Mission Control opens here",
-                "body": "Build a plan. Review gates. Save a packet.",
-                "caption": "v5.3 keeps humans in control.",
+                "title": "The referral story opens here",
+                "body": "Read the recommendation, inspect evidence, then save a note.",
+                "caption": "v6 keeps the operator path first.",
             },
             {
                 "title": "Population context is planned",
@@ -307,12 +307,15 @@ def _ensure_national_result() -> None:
 
 
 def _render_page_jump() -> None:
-    active_page = str(st.session_state.get("app_page", "Live Demo"))
+    active_page = str(st.session_state.get("app_page", APP_PAGE_LIVE))
+    if active_page == "Introduction":
+        active_page = APP_PAGE_JUDGES
+        st.session_state.app_page = APP_PAGE_JUDGES
     _, right = st.columns([0.72, 0.28], gap="large")
     with right:
-        label = "Back To Live Demo" if active_page == "Introduction" else "Open App Introduction"
-        if st.button(label, use_container_width=True):
-            st.session_state.app_page = "Live Demo" if active_page == "Introduction" else "Introduction"
+        label = "Back To Operator Demo" if active_page == APP_PAGE_JUDGES else "For Judges"
+        if st.button(label, width="stretch"):
+            st.session_state.app_page = APP_PAGE_LIVE if active_page == APP_PAGE_JUDGES else APP_PAGE_JUDGES
             st.rerun()
 
 
@@ -329,32 +332,37 @@ def _render_top_controls() -> tuple[str, str, str, str, bool]:
 
     st.markdown(
         (
-            "<section class='db-control-copy'>"
-            "<div class='db-section-label'>Mission setup</div>"
-            "<p>Start with the India-wide alert, then narrow the referral plan only when a judge asks about a place.</p>"
+            "<section class='db-command-strip'>"
+            "<div>"
+            "<div class='db-section-label'>Current question</div>"
+            "<p>Where should this specialty team go next, and what needs verification before action?</p>"
+            "</div>"
+            "<div class='db-command-note'>Adjust the mission only when the conversation needs a narrower place or care need.</div>"
             "</section>"
         ),
         unsafe_allow_html=True,
     )
 
-    cols = st.columns([1.1, 1, 1, 1, 0.92, 0.72], gap="medium")
-    with cols[0]:
-        mission_key = st.selectbox("Care need", list(MISSION_OPTIONS), format_func=MISSION_OPTIONS.get, key="mission_key")
-    with cols[1]:
-        state_focus = st.selectbox("State", state_options, key="state_focus")
-    with cols[2]:
-        district_options = _district_options(state_focus, national_result, latest_result)
-        if st.session_state.district_focus not in district_options:
-            st.session_state.district_focus = ALL_DISTRICTS_LABEL
-        district_focus = st.selectbox("District", district_options, key="district_focus")
-    with cols[3]:
-        confidence_label = st.select_slider("Minimum certainty", options=list(CONFIDENCE_OPTIONS), key="confidence_label")
-    with cols[4]:
-        st.write("")
-        run_button = st.button("Build Referral Plan", type="primary", use_container_width=True)
-    with cols[5]:
-        st.write("")
-        clear_button = st.button("Clear", use_container_width=True)
+    with st.popover("Adjust Mission"):
+        st.caption("These controls re-rank the same story: place, anchor, evidence, action.")
+        cols = st.columns([1.1, 1, 1, 1], gap="medium")
+        with cols[0]:
+            mission_key = st.selectbox("Care need", list(MISSION_OPTIONS), format_func=MISSION_OPTIONS.get, key="mission_key")
+        with cols[1]:
+            state_focus = st.selectbox("State", state_options, key="state_focus")
+        with cols[2]:
+            district_options = _district_options(state_focus, national_result, latest_result)
+            if st.session_state.district_focus not in district_options:
+                st.session_state.district_focus = ALL_DISTRICTS_LABEL
+            district_focus = st.selectbox("District", district_options, key="district_focus")
+        with cols[3]:
+            confidence_label = st.select_slider("Minimum certainty", options=list(CONFIDENCE_OPTIONS), key="confidence_label")
+
+        action_cols = st.columns([1, 0.6], gap="medium")
+        with action_cols[0]:
+            run_button = st.button("Build Referral Plan", type="primary", width="stretch")
+        with action_cols[1]:
+            clear_button = st.button("Clear", width="stretch")
 
     if clear_button:
         st.session_state.mission_key = "maternal_health"
@@ -373,13 +381,12 @@ def _render_top_controls() -> tuple[str, str, str, str, bool]:
             ("Shortlist", "Lakebase" if lakebase_available() else "Not configured"),
         ]
     )
-    with st.popover("How To Use"):
+    with st.popover("Demo Path"):
         st.markdown(
-            "- Read the India-wide alert first.\n"
-            "- Use State and District only when narrowing the story.\n"
-            "- Click **Build Referral Plan** to re-rank the map and packet.\n"
-            "- Open **Mission Control** to see why the app says save, verify, or hold.\n"
-            "- Save from **Shortlist** only after reviewing trust evidence."
+            "- Start on **Plan** and name Track 3 Referral Copilot.\n"
+            "- Use **Why This Place** to show the gates behind the action.\n"
+            "- Use **Evidence Check** to show citations and uncertainty.\n"
+            "- Use **Save Decision** to prove the shortlist persists."
         )
         st.caption(lakebase["detail"])
 
@@ -392,7 +399,7 @@ def _show_national_alert(result: dict[str, Any] | None) -> None:
         st.markdown(
             (
                 "<section class='db-alert-strip'>"
-                "<div><div class='db-alert-kicker'>Most important India alert</div>"
+                "<div><div class='db-alert-kicker'>Recommended next move</div>"
                 "<h2>National scan unavailable</h2>"
                 f"<p>{message}</p></div>"
                 "</section>"
@@ -440,7 +447,7 @@ def _show_national_alert(result: dict[str, Any] | None) -> None:
         (
             "<section class='db-alert-strip'>"
             "<div class='db-alert-main'>"
-            "<div class='db-alert-kicker'>Most important India alert</div>"
+            "<div class='db-alert-kicker'>Recommended next move</div>"
             f"<h2>{escape(action)}: {escape(location)}</h2>"
             f"<ul>{list_html}</ul>"
             "</div>"
@@ -451,13 +458,13 @@ def _show_national_alert(result: dict[str, Any] | None) -> None:
     )
 
 
-def _show_intro_page(national_result: dict[str, Any] | None) -> None:
+def _show_judge_page(national_result: dict[str, Any] | None) -> None:
     st.markdown(
         (
             "<section class='db-intro-hero'>"
-            "<div class='db-alert-kicker'>In-app introduction</div>"
-            "<h2>Care Convoy helps an operations lead choose the next referral move.</h2>"
-            "<p>The demo starts with an India-wide alert, then shows how evidence, uncertainty, trust checks, and persistence turn messy facility data into a cautious action.</p>"
+            "<div class='db-alert-kicker'>For judges</div>"
+            "<h2>Interactive proof room for the backend story.</h2>"
+            "<p>This page keeps the live demo clean for non-technical users while giving judges a one-click view of architecture, evidence, validation, and the three-minute pitch path.</p>"
             "</section>"
         ),
         unsafe_allow_html=True,
@@ -467,35 +474,36 @@ def _show_intro_page(national_result: dict[str, Any] | None) -> None:
 
     with tabs[0]:
         action_panel(
-            "How a non-technical user should use the app",
-            "Follow this order during the judge conversation.",
+            "Three-minute app-led pitch",
+            "Lead with the workflow, then prove the build.",
             [
-                "Read the India-wide alert first.",
-                "Use State and District only if the judge asks to narrow the map.",
-                "Click Build Referral Plan to re-rank districts and facility anchors.",
-                "Open Mission Control to see pass, review, and block gates.",
-                "Open Trust Evidence before saving any shortlist item.",
+                "0:00 - Name Track 3 Referral Copilot and show the recommended next move.",
+                "0:25 - Build or refresh one referral plan if the judge asks for a different mission.",
+                "1:05 - Open Why This Place and explain the weakest gate.",
+                "1:45 - Open Evidence Check for citations, duplicate risk, and website status.",
+                "2:20 - Save a shortlist decision with a verification note.",
+                "2:45 - Open this For Judges page for Databricks resources and validation proof.",
             ],
         )
         card_grid(
             [
                 {
-                    "title": "Map + Packet",
+                    "title": "Plan",
                     "body": "Shows the priority district, lead anchor, backup anchor, next action, and cited cautions.",
-                    "caption": "Use it as the first live demo screen.",
+                    "caption": "First live demo screen.",
                 },
                 {
-                    "title": "Mission Control",
+                    "title": "Why This Place",
                     "body": "Shows seven agent gates so judges can see why the plan says shortlist, verify first, or hold.",
-                    "caption": "This is the trust moment.",
+                    "caption": "Decision audit moment.",
                 },
                 {
-                    "title": "Anchor Review",
+                    "title": "Compare Anchors",
                     "body": "Compares facility candidates by fit, trust, confidence, and evidence rows.",
                     "caption": "Use it when judges ask why this facility.",
                 },
                 {
-                    "title": "Shortlist",
+                    "title": "Save Decision",
                     "body": "Saves a decision and verification note through Lakebase so action persists after interaction.",
                     "caption": "This proves the app is operational.",
                 },
@@ -505,11 +513,11 @@ def _show_intro_page(national_result: dict[str, Any] | None) -> None:
 
     with tabs[1]:
         steps = [
-            ("1", "Provided data", "Facilities, NFHS district health indicators, and India pincode geography are read from the Virtue Foundation catalog."),
-            ("2", "Need and supply", "NFHS signals and facility density identify where need is high and supply evidence is thin."),
-            ("3", "Trust and evidence", "Facility anchors are checked for fit, duplicate risk, website status, source URLs, and claim citations."),
-            ("4", "Mission Control", "Seven gates convert evidence into shortlist, verify-first, or hold guidance."),
-            ("5", "Persistence", "The chosen packet, gate trace, facility, district, and note are saved to Lakebase."),
+            ("1", "Unity Catalog", "Reads facilities, NFHS district health indicators, and India pincode geography from the provided dataset."),
+            ("2", "SQL Warehouse", "Scores district need, facility density, and candidate anchors without moving the source of truth."),
+            ("3", "Trust Desk", "Checks duplicate risk, website status, source URLs, and lead-anchor citations."),
+            ("4", "Agent Gates", "Seven pass, review, or block gates convert evidence into shortlist, verify-first, or hold guidance."),
+            ("5", "Lakebase + MLflow", "Saves the operator decision and records observability and evaluation proof for judges."),
         ]
         step_html = "".join(
             (
@@ -522,7 +530,7 @@ def _show_intro_page(national_result: dict[str, Any] | None) -> None:
         )
         st.markdown(f"<div class='db-pipeline'>{step_html}</div>", unsafe_allow_html=True)
         action_panel(
-            "What the pipeline is not claiming",
+            "What the backend is not claiming",
             "The demo is intentionally honest about scope.",
             [
                 "No travel-time routing denominator is active.",
@@ -530,6 +538,15 @@ def _show_intro_page(national_result: dict[str, Any] | None) -> None:
                 "Weak source evidence is downgraded instead of hidden.",
                 "The provided facility dataset remains the source of truth.",
             ],
+        )
+        card_grid(
+            [
+                {"title": "Databricks App", "body": "Streamlit presentation surface.", "caption": "Judges see the real app."},
+                {"title": "Provided tables", "body": "Facilities, NFHS, and pincodes.", "caption": "Virtue dataset remains primary."},
+                {"title": "Entity index", "body": "Cached from facilities only.", "caption": "Optimization, not a new source."},
+                {"title": "Persistence", "body": "Lakebase shortlist readback.", "caption": "The action survives interaction."},
+            ],
+            columns=4,
         )
 
     with tabs[2]:
@@ -567,32 +584,40 @@ def _show_intro_page(national_result: dict[str, Any] | None) -> None:
         )
 
     with tabs[3]:
-        action_panel(
-            "Three-minute judge path",
-            "Lead with the workflow, then prove the build.",
-            [
-                "0:00 - Name Track 3 Referral Copilot and show the India alert.",
-                "0:25 - Build or refresh one referral plan.",
-                "1:05 - Open Mission Control and explain the weakest gate.",
-                "1:45 - Open Trust Evidence for citations and uncertainty.",
-                "2:20 - Save a shortlist decision with a note.",
-                "2:45 - Close on Databricks Apps, Unity Catalog, Lakebase, and MLflow evaluation.",
-            ],
-        )
         card_grid(
             [
                 {
-                    "title": "Author",
-                    "body": "Pingying Chen",
-                    "caption": "Care Convoy submission.",
+                    "title": "Local regression suite",
+                    "body": "51 tests",
+                    "caption": "Run before and after the v6 UX slice.",
                 },
                 {
-                    "title": "Co-author",
-                    "body": "Zihang Liang",
-                    "caption": "Care Convoy submission.",
+                    "title": "Design conformance",
+                    "body": "Tracked in report",
+                    "caption": "Requirements, claims, and evidence are reconciled.",
+                },
+                {
+                    "title": "MLflow evaluation",
+                    "body": "Evidence grounded",
+                    "caption": "Recorded v5.3 native GenAI eval passed 5/5.",
+                },
+                {
+                    "title": "Demo rule",
+                    "body": "App first",
+                    "caption": "The deployed app carries the presentation.",
                 },
             ],
-            columns=2,
+            columns=4,
+        )
+        bullet_card(
+            "Version 6 focus",
+            [
+                "Operator home is simplified around the recommended action.",
+                "Judge/backend material is moved to this proof room.",
+                "The demo path is visible inside the app.",
+                "The existing scoring, evidence, and persistence backend remains unchanged.",
+            ],
+            "This slice improves presentation without changing the data contract.",
         )
 
 
@@ -656,8 +681,8 @@ def _show_mission_control(result: dict[str, Any]) -> None:
     left, right = st.columns([1.15, 0.85], gap="large")
 
     with left:
-        st.markdown("<div class='db-section-label'>Agent gate trace</div>", unsafe_allow_html=True)
-        with st.popover("Terms"):
+        st.markdown("<div class='db-section-label'>Why this recommendation</div>", unsafe_allow_html=True)
+        with st.popover("What The Gates Mean"):
             st.markdown(
                 "- **Gate:** pass, review, or block.\n"
                 "- **Density:** mapped facility supply.\n"
@@ -766,12 +791,12 @@ def _show_overview(result: dict[str, Any]) -> None:
             )
 
     with right:
-        bullet_card("Mission packet", _bullet_items(result["summary"]), _short_status(result["provenance"]))
+        bullet_card("Referral plan", _bullet_items(result["summary"]), _short_status(result["provenance"]))
         inline_metrics(
             [
                 ("Care need", result["mission_label"]),
-                ("Packet action", str(packet.get("action_state", "review")).title()),
-                ("Shortlist mode", "Lakebase" if lakebase_available() else "Not configured"),
+                ("Recommended action", str(packet.get("action_state", "review")).title()),
+                ("Save path", "Lakebase" if lakebase_available() else "Not configured"),
                 (
                     "Lead website status",
                     str(top_trust_review["website_verification_status"]) if top_trust_review is not None else "n/a",
@@ -791,39 +816,32 @@ def _show_overview(result: dict[str, Any]) -> None:
             )
         if result.get("board_summary"):
             bullet_card(
-                "Mission Control v5.3",
+                "Why the app is cautious",
                 [
                     _shorten(result["board_summary"], 90),
                     "Seven visible gates.",
                     "Weakest gate sets action.",
                 ],
-                "Review before saving.",
+                "Open Why This Place for the full gate trace.",
             )
         status_stack(_result_status_messages(result)[:2])
 
-    if packet:
-        card_grid(_mission_packet_items(packet), columns=4)
-
-    bottom_left, bottom_right = st.columns(2, gap="large")
-    with bottom_left:
-        action_panel(
-            "What to do next",
-            "Review in this order.",
-            [
-                "Check Mission Control gates.",
-                "Compare anchor candidates.",
-                "Review trust evidence.",
-                "Save only after verification.",
-            ],
-        )
-    with bottom_right:
-        status_stack(_result_status_messages(result)[2:5])
+    action_panel(
+        "Operator path",
+        "Keep the story in this order.",
+        [
+            "Plan: read the recommended action.",
+            "Why This Place: check the weakest gate.",
+            "Evidence Check: inspect citations and trust signals.",
+            "Save Decision: persist a verification note.",
+        ],
+    )
 
 
 def _show_review_board(result: dict[str, Any]) -> None:
     board = result.get("review_board", [])
     if not board:
-        st.info("Mission Control appears once a referral plan has been built.")
+        st.info("The decision audit appears once a referral plan has been built.")
         return
 
     board_frame = pd.DataFrame(board)
@@ -831,7 +849,7 @@ def _show_review_board(result: dict[str, Any]) -> None:
     with left:
         st.dataframe(
             board_frame[["agent", "verdict", "confidence", "evidence"]],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             height=300,
         )
@@ -853,7 +871,7 @@ def _show_review_board(result: dict[str, Any]) -> None:
             f"Final confidence: {supervisor['confidence']}",
         )
         action_panel(
-            "How Mission Control decides",
+            "How the decision audit works",
             "One gate per risk.",
             [
                 "Need Scout: district demand.",
@@ -881,7 +899,7 @@ def _show_anchors(result: dict[str, Any]) -> None:
             chart = build_confidence_chart(districts, "district", "priority_score")
             if chart is not None:
                 chart.update_layout(height=350, margin=dict(l=8, r=8, t=8, b=8))
-                st.plotly_chart(chart, use_container_width=True)
+                st.plotly_chart(chart, width="stretch")
 
     with right:
         if facilities.empty:
@@ -929,7 +947,7 @@ def _show_anchors(result: dict[str, Any]) -> None:
             if not facility_citations.empty:
                 st.dataframe(
                     facility_citations[["claim_type", "evidence", "source_url"]],
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -939,7 +957,7 @@ def _show_anchors(result: dict[str, Any]) -> None:
 def _show_trust_desk(result: dict[str, Any]) -> None:
     trust_reviews = result["trust_reviews"]
     if trust_reviews is None or trust_reviews.empty:
-        st.info("Trust Evidence appears once facility candidates are available.")
+        st.info("Evidence Check appears once facility candidates are available.")
         return
 
     left, right = st.columns([1.15, 0.85], gap="large")
@@ -956,7 +974,7 @@ def _show_trust_desk(result: dict[str, Any]) -> None:
                     "selection_source",
                 ]
             ],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             height=300,
         )
@@ -983,7 +1001,7 @@ def _show_trust_desk(result: dict[str, Any]) -> None:
             ],
             "Trust supports. It does not replace judgment.",
         )
-        st.dataframe(result["citations"], use_container_width=True, hide_index=True, height=300)
+        st.dataframe(result["citations"], width="stretch", hide_index=True, height=300)
         search_results = result.get("search_results")
         if search_results is not None and not search_results.empty:
             st.dataframe(
@@ -995,7 +1013,7 @@ def _show_trust_desk(result: dict[str, Any]) -> None:
                         "match_confidence",
                     ]
                 ],
-                use_container_width=True,
+                    width="stretch",
                 hide_index=True,
                 height=180,
             )
@@ -1010,7 +1028,7 @@ def _show_compare(result: dict[str, Any]) -> None:
     chart = build_tradeoff_chart(facilities)
     if chart is not None:
         chart.update_layout(height=300, margin=dict(l=8, r=8, t=8, b=8))
-        st.plotly_chart(chart, use_container_width=True)
+        st.plotly_chart(chart, width="stretch")
 
     left, right = st.columns(2, gap="large")
     for column, row in zip((left, right), facilities.itertuples(index=False), strict=False):
@@ -1036,7 +1054,7 @@ def _show_shortlist(result: dict[str, Any]) -> None:
         if saved_error:
             st.warning(saved_error)
         elif not saved.empty:
-            st.dataframe(_shortlist_display(saved), use_container_width=True, hide_index=True, height=310)
+            st.dataframe(_shortlist_display(saved), width="stretch", hide_index=True, height=310)
         else:
             card(
                 "No shortlist entries yet",
@@ -1105,20 +1123,8 @@ def _show_shortlist(result: dict[str, Any]) -> None:
 
 
 def _stage_selector() -> str:
-    segmented = getattr(st, "segmented_control", None)
-    if callable(segmented):
-        selected = segmented(
-            "Review View",
-            STAGE_VIEWS,
-            default="Map + Packet",
-            selection_mode="single",
-            label_visibility="collapsed",
-            key="stage_view",
-        )
-        return selected or "Map + Packet"
-
     return st.radio(
-        "Review View",
+        "Story View",
         STAGE_VIEWS,
         index=0,
         horizontal=True,
@@ -1129,16 +1135,36 @@ def _stage_selector() -> str:
 
 @st.fragment
 def _render_stage(view: str, result: dict[str, Any]) -> None:
-    if view == "Mission Control":
+    if view == "Why This Place":
         _show_mission_control(result)
-    elif view == "Map + Packet":
+    elif view == "Plan":
         _show_overview(result)
-    elif view == "Anchor Review":
+    elif view == "Compare Anchors":
         _show_anchors(result)
-    elif view == "Trust Evidence":
+    elif view == "Evidence Check":
         _show_trust_desk(result)
     else:
         _show_shortlist(result)
+
+
+def _render_story_path(active_view: str) -> None:
+    steps = [
+        ("Plan", "Recommendation"),
+        ("Why This Place", "Gate trace"),
+        ("Compare Anchors", "Facility fit"),
+        ("Evidence Check", "Citations"),
+        ("Save Decision", "Lakebase note"),
+    ]
+    html = "".join(
+        (
+            f"<div class='db-story-step{' active' if label == active_view else ''}'>"
+            f"<strong>{escape(label)}</strong>"
+            f"<span>{escape(caption)}</span>"
+            "</div>"
+        )
+        for label, caption in steps
+    )
+    st.markdown(f"<section class='db-story-path'>{html}</section>", unsafe_allow_html=True)
 
 
 st.set_page_config(page_title="Care Convoy", layout="wide", initial_sidebar_state="collapsed")
@@ -1148,24 +1174,26 @@ st.session_state.setdefault("latest_result", None)
 st.session_state.setdefault("national_result", None)
 st.session_state.setdefault("national_error", "")
 st.session_state.setdefault("national_scan_done", False)
-st.session_state.setdefault("app_page", "Live Demo")
+st.session_state.setdefault("app_page", APP_PAGE_LIVE)
 st.session_state.setdefault("mission_key", "maternal_health")
 st.session_state.setdefault("state_focus", ALL_STATES_LABEL)
 st.session_state.setdefault("district_focus", ALL_DISTRICTS_LABEL)
 st.session_state.setdefault("confidence_label", "Weak Evidence")
 
-if st.session_state.get("control_surface_version") != "top-controls-v1":
-    st.session_state.control_surface_version = "top-controls-v1"
+if st.session_state.get("control_surface_version") != "v6-operator-story":
+    st.session_state.control_surface_version = "v6-operator-story"
     st.session_state.state_focus = ALL_STATES_LABEL
     st.session_state.district_focus = ALL_DISTRICTS_LABEL
     st.session_state.confidence_label = "Weak Evidence"
+    st.session_state.stage_view = "Plan"
+    st.session_state.stage_view_radio = "Plan"
 
 _hero()
 _render_page_jump()
 _ensure_national_result()
 
-if st.session_state.app_page == "Introduction":
-    _show_intro_page(st.session_state.get("national_result"))
+if st.session_state.app_page == APP_PAGE_JUDGES:
+    _show_judge_page(st.session_state.get("national_result"))
     st.stop()
 
 mission_key, state_focus, district_focus, confidence_label, run_button = _render_top_controls()
@@ -1182,4 +1210,6 @@ _summary_metrics(result)
 if result is None:
     _show_empty_state()
 else:
-    _render_stage(_stage_selector(), result)
+    selected_view = _stage_selector()
+    _render_story_path(selected_view)
+    _render_stage(selected_view, result)

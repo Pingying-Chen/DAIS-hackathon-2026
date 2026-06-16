@@ -111,6 +111,31 @@ html, body, [data-testid="stAppViewContainer"] {
   line-height: 1.45;
 }
 
+.db-command-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.45fr);
+  gap: 14px;
+  align-items: end;
+  margin: 6px 0 8px 0;
+  padding: 10px 0 8px 0;
+  border-top: 1px solid var(--db-outline);
+  border-bottom: 1px solid var(--db-outline);
+}
+
+.db-command-strip p {
+  margin: 0;
+  color: var(--db-text);
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 800;
+}
+
+.db-command-note {
+  color: var(--db-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .db-alert-strip {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
@@ -534,6 +559,40 @@ html, body, [data-testid="stAppViewContainer"] {
   color: var(--db-text);
 }
 
+.db-story-path {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0 12px 0;
+}
+
+.db-story-step {
+  min-height: 58px;
+  padding: 9px 10px;
+  border-top: 1px solid var(--db-outline);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--db-surface) 62%, transparent), transparent);
+}
+
+.db-story-step.active {
+  border-top-color: var(--db-interactive);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--db-interactive) 15%, var(--db-surface)), transparent);
+}
+
+.db-story-step strong {
+  display: block;
+  color: var(--db-text);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.db-story-step span {
+  display: block;
+  margin-top: 4px;
+  color: var(--db-muted);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
 .db-status-stack {
   display: flex;
   flex-direction: column;
@@ -649,6 +708,11 @@ html, body, [data-testid="stAppViewContainer"] {
 
 @media (max-width: 1100px) {
   .db-alert-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .db-command-strip,
+  .db-story-path {
     grid-template-columns: 1fr;
   }
 
