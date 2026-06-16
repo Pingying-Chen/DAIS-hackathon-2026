@@ -80,3 +80,6 @@ recordings/
 captures/
 exports/
 tmp/
+
+# ── Local MLflow evaluation exports ───────────────────────────────────────────
+evals/evaluation_results_*.csv

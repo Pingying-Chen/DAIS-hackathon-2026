@@ -14,6 +14,25 @@ def _frame(rows: list[dict[str, object]], source: str) -> pd.DataFrame:
     return df
 
 
+def _district_citation_rows() -> list[dict[str, object]]:
+    return [
+        {
+            "facility_id": "district:nagpur:maharashtra",
+            "facility_name": "Nagpur, Maharashtra",
+            "claim_type": "nfhs_need_summary",
+            "evidence": "NFHS: child underweight 34.0%, insurance coverage 24.0%.",
+            "source_url": "unity-catalog://databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.nfhs_5_district_health_indicators",
+        },
+        {
+            "facility_id": "district:nagpur:maharashtra",
+            "facility_name": "Nagpur, Maharashtra",
+            "claim_type": "facility_density_context",
+            "evidence": "7 mission-matching facility row(s) mapped for this district.",
+            "source_url": "unity-catalog://databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.facilities",
+        },
+    ]
+
+
 def test_run_agent_reports_mixed_sources_truthfully(monkeypatch) -> None:
     districts = _frame(
         [
@@ -81,7 +100,7 @@ def test_run_agent_reports_mixed_sources_truthfully(monkeypatch) -> None:
     assert "Facility ranking is using demo-safe fallback data because no live anchor rows were returned." not in result["warnings"]
 
 
-def test_run_agent_returns_mission_control_v5_2_contract(monkeypatch) -> None:
+def test_run_agent_returns_mission_control_v5_3_contract(monkeypatch) -> None:
     districts = _frame(
         [
             {
@@ -187,13 +206,13 @@ def test_run_agent_returns_mission_control_v5_2_contract(monkeypatch) -> None:
         "Mission Strategist",
         "Supervisor",
     ]
-    assert result["board_summary"].startswith("Mission Control v5.2")
+    assert result["board_summary"].startswith("Mission Control v5.3")
     assert board[-1]["verdict"] == "shortlist with monitoring"
     assert board[-1]["confidence"] == "High Confidence"
     assert result["confidence_label"] == "High Confidence"
     assert result["summary_source"] == "deterministic fallback"
     assert [agent["gate"] for agent in result["mission_control_trace"]] == ["pass"] * 7
-    assert result["mission_packet"]["version"] == "v5.2"
+    assert result["mission_packet"]["version"] == "v5.3"
     assert result["mission_packet"]["action_state"] == "shortlist"
     assert result["mission_packet"]["lead_district"] == "Nagpur"
     assert result["mission_packet"]["lead_anchor"] == "Wockhardt Hospital Nagpur"
@@ -202,6 +221,124 @@ def test_run_agent_returns_mission_control_v5_2_contract(monkeypatch) -> None:
     assert "'gate': 'pass'" in captured_prompts[0]
     assert "Mission packet action: shortlist" in captured_prompts[0]
     assert "Return 4 to 6 bullets" in captured_prompts[0]
+
+
+def test_run_agent_uses_trust_review_for_lead_facility_entity(monkeypatch) -> None:
+    districts = _frame(
+        [
+            {
+                "district": "Nagpur",
+                "state": "Maharashtra",
+                "need_score": 82.0,
+                "coverage_gap": 64.0,
+                "facility_count": 7,
+                "evidence_score": 71.0,
+                "priority_score": 79.0,
+                "uncertainty_label": "Moderate Confidence",
+                "facility_density_context": "7 mission-matching facility row(s) mapped for this district.",
+                "density_confidence_label": "Moderate Confidence",
+                "density_matched": True,
+                "nfhs_need_summary": "NFHS: child underweight 34.0%, insurance coverage 24.0%.",
+                "risk_flags": "",
+            }
+        ],
+        "live",
+    )
+    facilities = _frame(
+        [
+            {
+                "unique_id": "lead-facility",
+                "name": "Lead Hospital",
+                "address_city": "Nagpur",
+                "address_stateOrRegion": "Maharashtra",
+                "capability_fit": 88.0,
+                "trust_score": 85.0,
+                "confidence_label": "High Confidence",
+                "specialties": "maternal health",
+                "procedure": "c-section",
+                "equipment": "nicu",
+                "capability": "24/7 emergency obstetrics",
+                "description": "Lead specialty care anchor",
+                "source_urls": '["https://example.org/lead"]',
+                "resolved_entity_id": "entity-lead",
+                "entity_record_count": 1,
+                "website_verification_status": "verified",
+                "selection_source": "dataset_url",
+                "primary_url": "https://example.org/lead",
+                "website_excerpt": "Lead care website.",
+                "risk_flags": "",
+            },
+            {
+                "unique_id": "backup-facility",
+                "name": "Backup Clinic",
+                "address_city": "Nagpur",
+                "address_stateOrRegion": "Maharashtra",
+                "capability_fit": 70.0,
+                "trust_score": 30.0,
+                "confidence_label": "Weak Evidence",
+                "specialties": "maternal health",
+                "procedure": "",
+                "equipment": "",
+                "capability": "Referral support",
+                "description": "Backup anchor",
+                "source_urls": '["https://example.org/backup"]',
+                "resolved_entity_id": "entity-backup",
+                "entity_record_count": 1,
+                "website_verification_status": "review required",
+                "selection_source": "dataset_url",
+                "primary_url": "https://example.org/backup",
+                "website_excerpt": "Backup website.",
+                "risk_flags": "",
+            },
+        ],
+        "live",
+    )
+    facilities.attrs["trust_reviews"] = pd.DataFrame(
+        [
+            {
+                "resolved_entity_id": "entity-backup",
+                "facility_id": "backup-facility",
+                "facility_name": "Backup Clinic",
+                "website_verification_status": "review required",
+                "trust_score_v2": 30.0,
+                "review_status": "Weak Evidence",
+                "duplicate_review_required": False,
+                "primary_url": "https://example.org/backup",
+                "website_excerpt": "Backup website.",
+                "entity_record_count": 1,
+            },
+            {
+                "resolved_entity_id": "entity-lead",
+                "facility_id": "lead-facility",
+                "facility_name": "Lead Hospital",
+                "website_verification_status": "verified",
+                "trust_score_v2": 85.0,
+                "review_status": "High Confidence",
+                "duplicate_review_required": False,
+                "primary_url": "https://example.org/lead",
+                "website_excerpt": "Lead care website.",
+                "entity_record_count": 1,
+            },
+        ]
+    )
+    facilities.attrs["search_results"] = pd.DataFrame()
+
+    monkeypatch.setattr(reasoning, "get_district_priorities", lambda *args, **kwargs: districts)
+    monkeypatch.setattr(reasoning, "get_facility_candidates", lambda *args, **kwargs: facilities)
+    monkeypatch.setattr(reasoning, "_llm_summary", lambda prompt: None)
+
+    result = reasoning.run_agent(
+        mission_type="maternal_health",
+        mission_label="Maternal Health",
+        state_filter="Maharashtra",
+        district_filter="",
+        confidence_threshold=0.25,
+        run_id="test-run",
+    )
+
+    trust_gate = next(agent for agent in result["mission_control_trace"] if agent["agent"] == "Trust Verifier")
+    assert trust_gate["gate"] == "pass"
+    assert "trust review score is 85.0" in trust_gate["evidence"]
 
 
 def test_run_agent_requires_review_for_ambiguous_density(monkeypatch) -> None:
@@ -482,10 +619,10 @@ def test_run_agent_uses_board_confidence_when_citations_are_missing(monkeypatch)
 
     assert result["review_board"][-1]["verdict"] == "hold for evidence"
     assert result["confidence_label"] == "Weak Evidence"
-    assert "No facility citation rows were available" in " ".join(result["warnings"])
+    assert "Lead anchor has no citation rows" in " ".join(result["warnings"])
     assert result["mission_control_trace"][-1]["gate"] == "block"
     assert result["mission_packet"]["action_state"] == "hold"
-    assert result["mission_packet"]["citation_status"] == "No citations available"
+    assert result["mission_packet"]["citation_status"] == "Lead anchor citations unavailable"
 
 
 def test_run_agent_does_not_warn_for_string_false_duplicate_review(monkeypatch) -> None:
@@ -621,6 +758,7 @@ def test_review_board_preserves_zero_trust_review_score() -> None:
                 "density_matched": True,
             },
         top_facility={
+            "unique_id": "facility-1",
             "name": "Wockhardt Hospital Nagpur",
             "address_city": "Nagpur",
             "capability_fit": 88.0,
@@ -635,7 +773,8 @@ def test_review_board_preserves_zero_trust_review_score() -> None:
             "duplicate_review_required": False,
         },
         citations=pd.DataFrame(
-            [
+            _district_citation_rows()
+            + [
                 {
                     "facility_id": "facility-1",
                     "facility_name": "Wockhardt Hospital Nagpur",
@@ -654,6 +793,55 @@ def test_review_board_preserves_zero_trust_review_score() -> None:
     assert board[-1]["confidence"] == "Weak Evidence"
 
 
+def test_review_board_blocks_when_lead_anchor_lacks_citations() -> None:
+    board, board_summary = reasoning._build_review_board(
+        mission_label="Maternal Health",
+        top_district={
+            "district": "Nagpur",
+            "state": "Maharashtra",
+            "need_score": 82.0,
+            "evidence_score": 71.0,
+            "uncertainty_label": "Moderate Confidence",
+            "facility_count": 7,
+            "facility_density_context": "7 mission-matching facility row(s) mapped for this district.",
+            "density_confidence_label": "Moderate Confidence",
+            "density_matched": True,
+        },
+        top_facility={
+            "unique_id": "lead-facility",
+            "name": "Lead Hospital",
+            "address_city": "Nagpur",
+            "capability_fit": 88.0,
+            "trust_score": 82.0,
+            "confidence_label": "High Confidence",
+            "website_verification_status": "verified",
+        },
+        top_trust_review={
+            "website_verification_status": "verified",
+            "trust_score_v2": 82.0,
+            "review_status": "High Confidence",
+            "duplicate_review_required": False,
+        },
+        citations=pd.DataFrame(
+            _district_citation_rows()
+            + [
+                {
+                    "facility_id": "backup-facility",
+                    "facility_name": "Backup Hospital",
+                    "claim_type": "description",
+                    "evidence": "Backup specialty care anchor",
+                    "source_url": "https://example.org/backup",
+                }
+            ]
+        ),
+        warnings=[],
+    )
+
+    assert board[4]["verdict"] == "lead anchor citation gaps found"
+    assert board[-1]["verdict"] == "hold for evidence"
+    assert "hold for evidence" in board_summary
+
+
 def test_review_board_falls_back_from_nan_trust_score_and_parses_string_false() -> None:
     board, _ = reasoning._build_review_board(
         mission_label="Maternal Health",
@@ -669,6 +857,7 @@ def test_review_board_falls_back_from_nan_trust_score_and_parses_string_false() 
                 "density_matched": True,
             },
         top_facility={
+            "unique_id": "facility-1",
             "name": "Wockhardt Hospital Nagpur",
             "address_city": "Nagpur",
             "capability_fit": 88.0,
@@ -683,7 +872,8 @@ def test_review_board_falls_back_from_nan_trust_score_and_parses_string_false() 
             "duplicate_review_required": "False",
         },
         citations=pd.DataFrame(
-            [
+            _district_citation_rows()
+            + [
                 {
                     "facility_id": "facility-1",
                     "facility_name": "Wockhardt Hospital Nagpur",
@@ -734,6 +924,21 @@ def test_build_evidence_rows_uses_clean_url_from_json_array() -> None:
 
     assert not rows.empty
     assert set(rows["source_url"]) == {"https://example.org/a"}
+
+
+def test_build_district_evidence_rows_cites_nfhs_and_density_sources() -> None:
+    rows = tools.build_district_evidence_rows(
+        {
+            "district": "Nagpur",
+            "state": "Maharashtra",
+            "nfhs_need_summary": "NFHS: child underweight 34.0%, insurance coverage 24.0%.",
+            "facility_density_context": "7 mission-matching facility row(s) mapped for this district.",
+        }
+    )
+
+    assert set(rows["claim_type"]) == {"nfhs_need_summary", "facility_density_context"}
+    assert rows["source_url"].str.startswith("unity-catalog://").all()
+    assert rows["facility_id"].eq("district:nagpur:maharashtra").all()
 
 
 def test_get_district_priorities_adds_nfhs_and_facility_density_context(monkeypatch) -> None:

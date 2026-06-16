@@ -79,3 +79,53 @@ def test_facility_query_uses_parameters_for_user_filters(monkeypatch) -> None:
         "state_filter": "%Maharashtra' or 1=1 --%",
         "district_filter": "%Nagpur%' or 'a'='a%",
     }
+
+
+def test_facility_query_parenthesizes_state_aliases(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_sql(statement: str, timeout_seconds: int = 20, parameters: dict[str, object] | None = None) -> pd.DataFrame:
+        captured["statement"] = statement
+        captured["parameters"] = parameters
+        return pd.DataFrame()
+
+    monkeypatch.setattr(tools, "run_sql", fake_run_sql)
+
+    tools.get_facility_candidates(
+        mission_type="maternal_health",
+        state_filter="Maharashtra",
+        district_filter="Nagpur",
+        confidence_threshold=0.25,
+    )
+
+    statement = str(captured["statement"])
+    assert "where (coalesce(lower(address_stateOrRegion), '') like lower(:state_filter) or" in statement
+    assert "like lower(:state_filter_alias_1))\n      and (coalesce(lower(address_city), '')" in statement
+    assert captured["parameters"] == {
+        "state_filter": "%Maharashtra%",
+        "state_filter_alias_1": "%Maharastra%",
+        "district_filter": "%Nagpur%",
+    }
+
+
+def test_facility_query_orders_candidate_window_before_limit(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_sql(statement: str, timeout_seconds: int = 20, parameters: dict[str, object] | None = None) -> pd.DataFrame:
+        captured["statement"] = statement
+        captured["parameters"] = parameters
+        return pd.DataFrame()
+
+    monkeypatch.setattr(tools, "run_sql", fake_run_sql)
+
+    tools.get_facility_candidates(
+        mission_type="surgery",
+        state_filter="Maharashtra",
+        district_filter="Nagpur",
+        confidence_threshold=0.25,
+    )
+
+    statement = str(captured["statement"]).lower()
+    assert "order by" in statement
+    assert statement.index("order by") < statement.index("limit")
+    assert "candidate_seed_score" in statement

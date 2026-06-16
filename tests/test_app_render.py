@@ -13,7 +13,7 @@ def test_app_initial_render_is_stable() -> None:
     assert not app.exception
     assert any(button.label == "Build Referral Plan" for button in app.button)
     rendered_markdown = "\n".join(markdown.value for markdown in app.markdown)
-    assert "v5.2 Mission Control" in rendered_markdown
+    assert "v5.3 Mission Control" in rendered_markdown
     assert "Mission Control opens here" in rendered_markdown
 
 

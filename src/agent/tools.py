@@ -17,6 +17,7 @@ from src.db.warehouse import run_sql
 
 CATALOG = os.environ.get("HACKATHON_CATALOG", "databricks_virtue_foundation_dataset_dais_2026")
 SCHEMA = os.environ.get("HACKATHON_SCHEMA", "virtue_foundation_dataset")
+FACILITY_CANDIDATE_WINDOW = 160
 
 MISSION_KEYWORDS = {
     "maternal_health": ["maternal", "obstetric", "delivery", "nicu"],
@@ -226,6 +227,10 @@ def _source_urls(value: Any) -> list[str]:
     if isinstance(parsed, str) and parsed.strip():
         return [parsed.strip()]
     return []
+
+
+def _unity_catalog_uri(table_name: str) -> str:
+    return f"unity-catalog://{CATALOG}.{SCHEMA}.{table_name}"
 
 
 def _primary_domain(value: Any) -> str:
@@ -1299,6 +1304,22 @@ def get_facility_candidates(
         )
         parameters["district_filter"] = f"%{district_filter}%"
 
+    candidate_seed_score = """
+      (
+        case when coalesce(specialties, '') <> '' then 12 else 0 end +
+        case when coalesce(procedure, '') <> '' then 12 else 0 end +
+        case when coalesce(equipment, '') <> '' then 12 else 0 end +
+        case when coalesce(capability, '') <> '' then 12 else 0 end +
+        case when coalesce(description, '') <> '' then 12 else 0 end +
+        case when coalesce(source_urls, '') <> '' then 12 else 0 end +
+        coalesce(try_cast(numberDoctors as double), 0.0) * 0.7 +
+        coalesce(try_cast(capacity as double), 0.0) * 0.08 +
+        coalesce(try_cast(distinct_social_media_presence_count as double), 0.0) * 14 +
+        coalesce(try_cast(affiliated_staff_presence as double), 0.0) * 18 +
+        coalesce(try_cast(custom_logo_presence as double), 0.0) * 10
+      )
+    """
+
     sql = f"""
     select
       unique_id,
@@ -1320,13 +1341,15 @@ def get_facility_candidates(
       capacity,
       recency_of_page_update,
       latitude,
-      longitude
+      longitude,
+      {candidate_seed_score} as candidate_seed_score
     from {CATALOG}.{SCHEMA}.facilities
-    where {state_clause}
+    where ({state_clause})
       and ({district_clause})
       and coalesce(lower(address_country), '') like '%india%'
       and ({keyword_filter})
-    limit 40
+    order by candidate_seed_score desc, coalesce(name, '') asc, coalesce(unique_id, '') asc
+    limit {FACILITY_CANDIDATE_WINDOW}
     """
     raw = run_sql(sql, parameters=parameters)
     if raw.empty:
@@ -1404,6 +1427,48 @@ def build_evidence_rows(df: pd.DataFrame, trust_reviews: pd.DataFrame | None = N
                         "source_url": review.primary_url,
                     }
                 )
+
+    if not rows:
+        return pd.DataFrame(columns=["facility_id", "facility_name", "claim_type", "evidence", "source_url"])
+    return pd.DataFrame(rows)
+
+
+def build_district_evidence_rows(top_district: dict[str, Any] | None) -> pd.DataFrame:
+    if not top_district:
+        return pd.DataFrame(columns=["facility_id", "facility_name", "claim_type", "evidence", "source_url"])
+
+    district = _safe_text(top_district.get("district")) or "unknown district"
+    state = _safe_text(top_district.get("state")) or "unknown state"
+    district_id = f"district:{_location_key(district)}:{_state_key(state)}"
+    district_name = f"{district}, {state}".strip(", ")
+    rows: list[dict[str, Any]] = []
+
+    nfhs_summary = _safe_text(top_district.get("nfhs_need_summary"))
+    if nfhs_summary and "unavailable" not in nfhs_summary.lower():
+        rows.append(
+            {
+                "facility_id": district_id,
+                "facility_name": district_name,
+                "claim_type": "nfhs_need_summary",
+                "evidence": nfhs_summary,
+                "source_url": _unity_catalog_uri("nfhs_5_district_health_indicators"),
+            }
+        )
+
+    density_context = _safe_text(top_district.get("facility_density_context"))
+    if density_context and "unavailable" not in density_context.lower():
+        rows.append(
+            {
+                "facility_id": district_id,
+                "facility_name": district_name,
+                "claim_type": "facility_density_context",
+                "evidence": density_context,
+                "source_url": (
+                    f"{_unity_catalog_uri('facilities')} + "
+                    f"{_unity_catalog_uri('india_post_pincode_directory')}"
+                ),
+            }
+        )
 
     if not rows:
         return pd.DataFrame(columns=["facility_id", "facility_name", "claim_type", "evidence", "source_url"])

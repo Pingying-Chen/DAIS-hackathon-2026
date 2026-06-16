@@ -1,6 +1,6 @@
 # Care Convoy
 
-Care Convoy is a Databricks Apps submission for the Virtue Foundation Data for Good hackathon. It helps a Virtue Foundation operations lead decide where to send the next specialty medical team in India by combining district health need, facility capability, cited evidence, uncertainty labels, and a v5.2 Mission Control agent loop before a plan is saved.
+Care Convoy is a Databricks Apps submission for the Virtue Foundation Data for Good hackathon. It helps a Virtue Foundation operations lead decide where to send the next specialty medical team in India by combining district health need, facility capability, cited evidence, uncertainty labels, and a v5.3 Mission Control gate board before a plan is saved.
 
 ## Judge Summary
 
@@ -12,7 +12,7 @@ Care Convoy is a Databricks Apps submission for the Virtue Foundation Data for G
 
 ## Demo Screenshot
 
-![Care Convoy v5.2 demo showing the Maharashtra referral map and mission packet](docs/assets/care-convoy-demo.jpg)
+![Care Convoy v5.3 demo showing the Maharashtra referral map and mission packet](docs/assets/care-convoy-demo.jpg)
 
 ## How To Use It
 
@@ -38,7 +38,7 @@ Care Convoy is a Databricks Apps submission for the Virtue Foundation Data for G
 - **Referral planning:** Ranks districts and candidate facility anchors for the selected care need.
 - **NFHS-backed district context:** Uses district health indicators alongside facility-density context to explain why a place should be reviewed.
 - **Trust Desk:** Resolves duplicate-looking facility rows, checks public website evidence, and calculates trust-supported recommendation signals.
-- **Mission Control v5.2:** Separates the decision into need, supply density, facility fit, trust verification, citation safety, mission strategy, and supervisor approval.
+- **Mission Control v5.3:** Separates the decision into need, supply density, facility fit, trust verification, citation safety, mission strategy, and supervisor approval.
 - **Evidence ledger:** Shows source-backed facility text behind important claims and keeps missing citations visible.
 - **Shortlist persistence:** Saves operational decisions and reloads them from Lakebase.
 
@@ -54,7 +54,7 @@ The app treats this data as valuable but imperfect. Weak joins, sparse capabilit
 
 ## Mission Control
 
-The v5.2 Mission Control loop helps keep the recommendation from becoming a single opaque score:
+The v5.3 Mission Control gate board helps keep the recommendation from becoming a single opaque score:
 
 - **Need Scout** checks district need and uncertainty.
 - **Supply Mapper** checks facility-density pressure for the district context.
@@ -64,7 +64,7 @@ The v5.2 Mission Control loop helps keep the recommendation from becoming a sing
 - **Mission Strategist** combines need, supply, capability, trust, and evidence into an action recommendation.
 - **Supervisor** produces the final board verdict and confidence used in the saved shortlist.
 
-The mission packet also carries the v5.2 population-denominator data contract, but population context is explicitly marked as planned and inactive until a source and join coverage are validated.
+The mission packet also carries the v5.3 population-denominator data contract, but population context is explicitly marked as planned and inactive until a source and join coverage are validated.
 
 ## Architecture At A Glance
 
@@ -81,7 +81,7 @@ flowchart LR
 
     planner --> trust["Trust Desk"]
     trust --> evidence["Evidence ledger"]
-    evidence --> board["Mission Control v5.2"]
+    evidence --> board["Mission Control v5.3"]
     board --> packet["Referral recommendation"]
     packet --> lakebase["Lakebase shortlist"]
     lakebase --> saved["Saved decisions"]
@@ -89,17 +89,19 @@ flowchart LR
 
 ## Validation Status
 
-- Local deterministic tests pass: `35 passed`.
+- Local deterministic tests pass: `41 passed`.
 - Python syntax compilation passes.
 - Local Streamlit health check passes at `/_stcore/health`.
 - Dependency audit returned no known vulnerabilities.
-- The v5.2 Databricks App is deployed and `RUNNING`.
-- Lakebase read-after-write smoke confirmed shortlist metadata can persist and reload.
+- The v5.3 Databricks App is deployed and `RUNNING`.
+- Authenticated hosted UI validation saved a shortlist item and a Lakebase readback confirmed the saved decision reloaded.
+- Native MLflow GenAI evaluation ran with dataset `workspace.default.care_convoy_eval_v5_3`, two registered scorers, and 5/5 `yes` results for evidence grounding and operator actionability.
+- Lakebase read-after-write confirmed shortlist metadata can persist and reload.
 - Live Databricks data checks confirmed all three provided tables are populated, and the current code path returns live NFHS plus Maharashtra facility-density rows without falling back.
 
-## V5.2 Scope
+## V5.3 Scope
 
-Mission Control is now implemented as a visible pass/review/block agent trace. The optional population reference remains planned, not active, so the provided Virtue Foundation tables remain the primary decision source.
+Mission Control is now implemented as a visible pass/review/block gate board. Version 5.3 adds deterministic facility candidate-window ordering, lead-anchor citation gating, NFHS/density provenance rows, lead-entity trust-review alignment, and optional MLflow tracing hooks. The optional population reference remains planned, not active, so the provided Virtue Foundation tables remain the primary decision source.
 
 ## Version History
 
@@ -111,6 +113,7 @@ Mission Control is now implemented as a visible pass/review/block agent trace. T
 - `v5.0` - Planned the multi-agent referral flow with a team-of-agents pattern.
 - `v5.1` - Rebuilt the Streamlit app around the updated demo skills and deployed the Mission Control experience.
 - `v5.2` - Added short-copy design guidance, bullet-led content, visible pass/review/block mission packets, and v5.2 deployment validation.
+- `v5.3` - Fixed release-eval blockers around facility ranking, lead citations, district provenance, trust alignment, MLflow tracing, hosted readback, and native MLflow evaluation.
 
 ## Demo Payoff
 

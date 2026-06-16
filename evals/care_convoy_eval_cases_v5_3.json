@@ -1,0 +1,42 @@
+[
+  {
+    "mission_type": "maternal_health",
+    "mission_label": "Maternal Health",
+    "state_filter": "Maharashtra",
+    "district_filter": "",
+    "confidence_threshold": 0.0,
+    "run_id": "mlflow-eval-v5-3-maternal-state"
+  },
+  {
+    "mission_type": "surgery",
+    "mission_label": "Surgery",
+    "state_filter": "Maharashtra",
+    "district_filter": "",
+    "confidence_threshold": 0.0,
+    "run_id": "mlflow-eval-v5-3-surgery-state"
+  },
+  {
+    "mission_type": "emergency_care",
+    "mission_label": "Emergency Care",
+    "state_filter": "Maharashtra",
+    "district_filter": "Nandurbar",
+    "confidence_threshold": 0.0,
+    "run_id": "mlflow-eval-v5-3-emergency-nandurbar"
+  },
+  {
+    "mission_type": "maternal_health",
+    "mission_label": "Maternal Health",
+    "state_filter": "Maharashtra",
+    "district_filter": "Nagpur",
+    "confidence_threshold": 0.35,
+    "run_id": "mlflow-eval-v5-3-maternal-nagpur"
+  },
+  {
+    "mission_type": "general_access",
+    "mission_label": "General Access",
+    "state_filter": "Maharashtra",
+    "district_filter": "",
+    "confidence_threshold": 0.5,
+    "run_id": "mlflow-eval-v5-3-general-access"
+  }
+]

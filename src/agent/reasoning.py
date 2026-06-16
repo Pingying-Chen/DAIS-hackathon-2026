@@ -4,15 +4,21 @@ import os
 from math import isnan
 from typing import Any
 
+import pandas as pd
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
 
 from src.agent.prompts import DEVHUB_LAKEBASE_SUBAGENT_PROMPT
+from src.agent.tracing import trace_agent_run, tracing_status
 from src.agent.tools import (
+    build_district_evidence_rows,
     build_evidence_rows,
     get_district_priorities,
     get_facility_candidates,
 )
+
+MISSION_CONTROL_VERSION = "v5.3"
+DISTRICT_CLAIM_TYPES = {"nfhs_need_summary", "facility_density_context"}
 
 
 def _deterministic_summary(
@@ -185,6 +191,69 @@ def _missing_source_count(citations: Any) -> int:
     return int(source_urls.eq("").sum())
 
 
+def _empty_citation_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=["facility_id", "facility_name", "claim_type", "evidence", "source_url"])
+
+
+def _citation_frame(citations: Any) -> pd.DataFrame:
+    if isinstance(citations, pd.DataFrame):
+        return citations
+    return _empty_citation_frame()
+
+
+def _lead_citation_frame(citations: Any, top_facility: dict[str, Any] | None) -> pd.DataFrame:
+    frame = _citation_frame(citations)
+    if frame.empty or top_facility is None:
+        return _empty_citation_frame()
+
+    mask = pd.Series(False, index=frame.index)
+    lead_id = str(_value(top_facility, "unique_id", "")).strip()
+    lead_name = str(_value(top_facility, "name", "")).strip()
+    if lead_id and "facility_id" in frame:
+        mask = mask | frame["facility_id"].fillna("").astype(str).str.strip().eq(lead_id)
+    if lead_name and "facility_name" in frame:
+        mask = mask | frame["facility_name"].fillna("").astype(str).str.strip().eq(lead_name)
+    return frame.loc[mask].copy()
+
+
+def _district_citation_frame(citations: Any) -> pd.DataFrame:
+    frame = _citation_frame(citations)
+    if frame.empty or "claim_type" not in frame:
+        return _empty_citation_frame()
+    return frame[frame["claim_type"].isin(DISTRICT_CLAIM_TYPES)].copy()
+
+
+def _district_citations_required(top_district: dict[str, Any] | None) -> bool:
+    if top_district is None:
+        return False
+    district_claims = [
+        str(_value(top_district, "nfhs_need_summary", "")).strip().lower(),
+        str(_value(top_district, "facility_density_context", "")).strip().lower(),
+    ]
+    return any(claim and "unavailable" not in claim for claim in district_claims)
+
+
+def _matching_trust_review(trust_reviews: Any, top_facility: dict[str, Any] | None) -> dict[str, Any] | None:
+    if top_facility is None or trust_reviews is None or getattr(trust_reviews, "empty", True):
+        return None
+
+    frame = trust_reviews
+    lead_entity = str(_value(top_facility, "resolved_entity_id", "")).strip()
+    lead_id = str(_value(top_facility, "unique_id", "")).strip()
+    lead_name = str(_value(top_facility, "name", "")).strip()
+
+    for column, value in [
+        ("resolved_entity_id", lead_entity),
+        ("facility_id", lead_id),
+        ("facility_name", lead_name),
+    ]:
+        if value and column in frame:
+            matched = frame[frame[column].fillna("").astype(str).str.strip().eq(value)]
+            if not matched.empty:
+                return matched.iloc[0].to_dict()
+    return frame.iloc[0].to_dict()
+
+
 def _build_review_board(
     mission_label: str,
     top_district: dict[str, Any] | None,
@@ -197,6 +266,11 @@ def _build_review_board(
     missing_source_count = 0
     if citation_count:
         missing_source_count = _missing_source_count(citations)
+    lead_citations = _lead_citation_frame(citations, top_facility)
+    lead_citation_count = int(len(lead_citations))
+    district_citations = _district_citation_frame(citations)
+    district_citation_count = int(len(district_citations))
+    district_citations_required = _district_citations_required(top_district)
 
     need_score = _score(top_district, "need_score")
     evidence_score = _score(top_district, "evidence_score")
@@ -222,7 +296,12 @@ def _build_review_board(
     facility_confidence = _value(top_facility, "confidence_label", _confidence_from_scores(capability_fit, trust_score))
     trust_confidence = _value(top_trust_review, "review_status", _confidence_from_scores(trust_review_score))
     evidence_confidence = "High Confidence"
-    if citation_count == 0 or missing_source_count:
+    if (
+        citation_count == 0
+        or missing_source_count
+        or lead_citation_count == 0
+        or (district_citations_required and district_citation_count == 0)
+    ):
         evidence_confidence = "Weak Evidence"
     elif citation_count < 3 or warnings:
         evidence_confidence = "Moderate Confidence"
@@ -244,13 +323,24 @@ def _build_review_board(
     evidence_verdict = "claim-safe"
     if citation_count == 0:
         evidence_verdict = "no citations available"
+    elif lead_citation_count == 0:
+        evidence_verdict = "lead anchor citation gaps found"
+    elif district_citations_required and district_citation_count == 0:
+        evidence_verdict = "district citation gaps found"
     elif missing_source_count:
         evidence_verdict = "citation gaps found"
     elif warnings:
         evidence_verdict = "claim-safe with cautions"
 
     final_confidence = _confidence_from_scores(capability_fit, trust_score, trust_review_score)
-    if citation_count == 0 or missing_source_count or top_district is None or top_facility is None:
+    if (
+        citation_count == 0
+        or lead_citation_count == 0
+        or missing_source_count
+        or (district_citations_required and district_citation_count == 0)
+        or top_district is None
+        or top_facility is None
+    ):
         final_verdict = "hold for evidence"
         final_confidence = "Weak Evidence"
     elif (
@@ -302,7 +392,11 @@ def _build_review_board(
             "Checks that recommendation claims have citations and visible cautions.",
             evidence_verdict,
             evidence_confidence,
-            f"{citation_count} evidence rows are attached; {missing_source_count} citation rows lack a source URL.",
+            (
+                f"{lead_citation_count} lead anchor citation row(s), "
+                f"{district_citation_count} district provenance row(s), "
+                f"{missing_source_count} citation row(s) lack a source URL."
+            ),
             "Suppress or qualify claims that cannot be cited cleanly.",
         ),
         _board_item(
@@ -323,7 +417,7 @@ def _build_review_board(
         ),
     ]
     board_summary = (
-        f"Mission Control v5.2 recommends {final_verdict} for {facility_name} "
+        f"Mission Control {MISSION_CONTROL_VERSION} recommends {final_verdict} for {facility_name} "
         f"serving {district_name} with {final_confidence}."
     )
     return board, board_summary
@@ -362,13 +456,25 @@ def _build_mission_control_trace(board: list[dict[str, str]]) -> list[dict[str, 
     return trace
 
 
-def _citation_status(citations: Any) -> str:
+def _citation_status(
+    citations: Any,
+    top_facility: dict[str, Any] | None = None,
+    top_district: dict[str, Any] | None = None,
+) -> str:
     citation_count = int(len(citations)) if citations is not None else 0
     if citation_count == 0:
         return "No citations available"
+    lead_citation_count = int(len(_lead_citation_frame(citations, top_facility))) if top_facility is not None else 0
+    if top_facility is not None and lead_citation_count == 0:
+        return "Lead anchor citations unavailable"
+    district_citation_count = int(len(_district_citation_frame(citations)))
+    if _district_citations_required(top_district) and district_citation_count == 0:
+        return "District provenance unavailable"
     missing_source_count = _missing_source_count(citations)
     if missing_source_count:
         return f"{citation_count} citation row(s), {missing_source_count} missing source URL(s)"
+    if top_facility is not None:
+        return f"{lead_citation_count} lead anchor citation row(s), {district_citation_count} district provenance row(s)"
     return f"{citation_count} cited evidence row(s)"
 
 
@@ -398,7 +504,7 @@ def _build_mission_packet(
         next_action = "Review warnings before saving."
 
     return {
-        "version": "v5.2",
+        "version": MISSION_CONTROL_VERSION,
         "mission_label": mission_label,
         "lead_district": _value(top_district, "district", "No district"),
         "lead_state": _value(top_district, "state", ""),
@@ -407,7 +513,7 @@ def _build_mission_packet(
         "action_state": action_state,
         "confidence": supervisor.get("confidence", "Weak Evidence"),
         "board_gate_state": supervisor.get("gate", "block"),
-        "citation_status": _citation_status(citations),
+        "citation_status": _citation_status(citations, lead_facility, top_district),
         "nfhs_signals": _value(top_district, "nfhs_need_summary", "NFHS context unavailable"),
         "facility_density_context": _value(top_district, "facility_density_context", "Facility density unavailable"),
         "population_context_status": "Population denominator planned. Not active.",
@@ -418,6 +524,7 @@ def _build_mission_packet(
     }
 
 
+@trace_agent_run("care_convoy_mission_control_v5_3")
 def run_agent(
     mission_type: str,
     mission_label: str,
@@ -430,12 +537,15 @@ def run_agent(
     facilities = get_facility_candidates(mission_type, state_filter, district_filter, confidence_threshold)
     trust_reviews = _frame_attr(facilities, "trust_reviews")
     search_results = _frame_attr(facilities, "search_results")
-    citations = build_evidence_rows(facilities, trust_reviews)
     district_source = _result_source(districts)
     facility_source = _result_source(facilities)
     top_district = districts.iloc[0].to_dict() if not districts.empty else None
     top_facility = facilities.iloc[0].to_dict() if not facilities.empty else None
-    top_trust_review = trust_reviews.iloc[0].to_dict() if trust_reviews is not None and not trust_reviews.empty else None
+    top_trust_review = _matching_trust_review(trust_reviews, top_facility)
+    facility_citations = build_evidence_rows(facilities, trust_reviews)
+    district_citations = build_district_evidence_rows(top_district)
+    citation_frames = [frame for frame in [facility_citations, district_citations] if not frame.empty]
+    citations = pd.concat(citation_frames, ignore_index=True) if citation_frames else _empty_citation_frame()
 
     warnings: list[str] = []
     if district_source != "live":
@@ -446,6 +556,10 @@ def run_agent(
         warnings.append("Facility-density context is ambiguous for the lead district and needs operator review before saving.")
     if citations.empty:
         warnings.append("No facility citation rows were available, so the board should hold or qualify the recommendation.")
+    elif top_facility is not None and _lead_citation_frame(citations, top_facility).empty:
+        warnings.append("Lead anchor has no citation rows, so the board should hold the recommendation.")
+    if _district_citations_required(top_district) and _district_citation_frame(citations).empty:
+        warnings.append("District need or facility-density claims are missing provenance rows.")
     if _missing_source_count(citations):
         warnings.append("Some facility claims do not have source URLs yet and should stay in review.")
     if trust_reviews is not None and not trust_reviews.empty:
@@ -479,7 +593,7 @@ def run_agent(
         f"Top district: {top_district}\n"
         f"Top facility: {top_facility}\n"
         f"Top trust review: {top_trust_review}\n"
-        f"Mission Control v5.2 trace: {mission_control_trace}\n"
+        f"Mission Control {MISSION_CONTROL_VERSION} trace: {mission_control_trace}\n"
         f"Mission packet action: {mission_packet['action_state']}\n"
         f"Warnings: {warnings}\n"
         "Use only supplied evidence. Return 4 to 6 bullets. Keep each bullet under 10 words."
@@ -522,4 +636,7 @@ def run_agent(
         "board_summary": board_summary,
         "warnings": warnings,
         "provenance": provenance,
+        "observability": {
+            "mlflow": tracing_status(),
+        },
     }

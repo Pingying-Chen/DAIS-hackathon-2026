@@ -110,7 +110,7 @@ def _short_status(message: str) -> str:
 
 def _hero() -> None:
     hero_header(
-        eyebrow="Track 3 Referral Copilot · v5.2 Mission Control",
+        eyebrow="Track 3 Referral Copilot · v5.3 Mission Control",
         title="Care Convoy Mission Control",
         subtitle="Plan the next referral move. Check need, supply, trust, and evidence. Save only after review.",
         chips=[
@@ -155,7 +155,7 @@ def _show_empty_state() -> None:
             {
                 "title": "Mission Control opens here",
                 "body": "Build a plan. Review gates. Save a packet.",
-                "caption": "v5.2 keeps humans in control.",
+                "caption": "v5.3 keeps humans in control.",
             },
             {
                 "title": "Population context is planned",
@@ -353,7 +353,7 @@ def _show_overview(result: dict[str, Any]) -> None:
             )
         if result.get("board_summary"):
             bullet_card(
-                "Mission Control v5.2",
+                "Mission Control v5.3",
                 [
                     _shorten(result["board_summary"], 90),
                     "Seven visible gates.",
