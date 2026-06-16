@@ -53,25 +53,41 @@ def build_confidence_chart(df: pd.DataFrame, label_column: str, value_column: st
         return None
 
     theme = tokens()
-    chart_df = _chart_frame(df, [label_column, value_column]).head(8)
+    chart_df = _chart_frame(df, [label_column, value_column])
+    chart_df = chart_df.sort_values(value_column, ascending=False).head(8)
+    chart_df = chart_df.sort_values(value_column, ascending=True)
+    max_score = float(chart_df[value_column].max())
+    chart_df["Urgency"] = chart_df[value_column].apply(
+        lambda value: "Most urgent" if float(value) == max_score else "Other districts"
+    )
+    chart_df["Score"] = chart_df.apply(
+        lambda row: f"{float(row[value_column]):.0f}/100 · Most urgent"
+        if row["Urgency"] == "Most urgent"
+        else f"{float(row[value_column]):.0f}/100",
+        axis=1,
+    )
     label_title = label_column.replace("_", " ").title()
     chart = px.bar(
         chart_df,
         x=value_column,
         y=label_column,
         orientation="h",
+        text="Score",
         labels={
-            value_column: "Priority score (0-100; higher means stronger starting point)",
+            value_column: "Urgency score",
             label_column: label_title,
+            "Urgency": "Urgency",
         },
-        color=value_column,
-        color_continuous_scale=[
-            _css_hsl_to_hex(str(theme["surface_hi"])),
-            _css_hsl_to_hex(str(theme["info"])),
-            _css_hsl_to_hex(str(theme["interactive"])),
-        ],
+        color="Urgency",
+        color_discrete_map={
+            "Most urgent": _css_hsl_to_hex(str(theme["interactive"])),
+            "Other districts": _css_hsl_to_hex(str(theme["surface_hi"])),
+        },
     )
-    chart.update_traces(marker_line_width=0, hovertemplate="%{y}: %{x:.1f} on a 0-100 scale<extra></extra>")
+    chart.update_traces(marker_line_width=0, textposition="auto", hovertemplate="%{y}: %{x:.0f}/100<extra></extra>")
+    chart.update_layout(showlegend=False)
+    chart.update_xaxes(range=[0, 100])
+    chart.update_yaxes(categoryorder="array", categoryarray=chart_df[label_column].tolist())
     return _apply_chart_theme(chart)
 
 
@@ -97,7 +113,7 @@ def build_tradeoff_chart(df: pd.DataFrame) -> Figure | None:
         barmode="group",
         labels={
             "Metric": "Comparison signal",
-            "score": "Score (0-100; higher means stronger)",
+            "score": "Score",
             "name": "Facility",
         },
         color_discrete_sequence=[
@@ -105,5 +121,6 @@ def build_tradeoff_chart(df: pd.DataFrame) -> Figure | None:
             _css_hsl_to_hex(str(theme["accent"])),
         ],
     )
-    chart.update_traces(hovertemplate="%{fullData.name}: %{y:.1f} on a 0-100 scale<extra></extra>")
+    chart.update_traces(hovertemplate="%{fullData.name}: %{y:.0f}/100<extra></extra>")
+    chart.update_yaxes(range=[0, 100])
     return _apply_chart_theme(chart)

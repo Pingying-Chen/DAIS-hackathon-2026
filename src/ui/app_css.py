@@ -31,7 +31,7 @@ html, body, [data-testid="stAppViewContainer"] {
 
 [data-testid="stMainBlockContainer"] {
   max-width: 100%;
-  padding: 42px 88px 52px 88px;
+  padding: 24px 42px 44px 42px;
 }
 
 [data-testid="stSidebar"] {
@@ -43,9 +43,9 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 .db-hero {
-  padding: 12px 0 18px 0;
+  padding: 6px 0 12px 0;
   border-bottom: 1px solid var(--db-outline);
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .db-eyebrow {
@@ -64,8 +64,8 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 .db-title {
-  margin: 10px 0 6px 0;
-  font-size: 32px;
+  margin: 8px 0 4px 0;
+  font-size: 29px;
   line-height: 1.05;
   font-weight: 800;
   letter-spacing: 0;
@@ -75,7 +75,7 @@ html, body, [data-testid="stAppViewContainer"] {
   margin: 0;
   max-width: 92ch;
   color: var(--db-muted);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -120,11 +120,11 @@ html, body, [data-testid="stAppViewContainer"] {
 
 .db-command-strip {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.45fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   align-items: end;
-  margin: 6px 0 8px 0;
-  padding: 10px 0 8px 0;
+  margin: 4px 0 10px 0;
+  padding: 8px 0 8px 0;
   border-top: 1px solid var(--db-outline);
   border-bottom: 1px solid var(--db-outline);
 }
@@ -132,25 +132,29 @@ html, body, [data-testid="stAppViewContainer"] {
 .db-command-strip p {
   margin: 0;
   color: var(--db-text);
-  font-size: 15px;
+  font-size: 17px;
   line-height: 1.35;
   font-weight: 800;
 }
 
 .db-command-note {
   color: var(--db-muted);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
+.db-control-spacer {
+  height: 26px;
+}
+
 .db-alert-strip {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
-  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) minmax(460px, 0.9fr);
+  gap: 16px;
   align-items: stretch;
-  margin: 12px 0;
-  padding: 16px 18px;
+  margin: 8px 0 10px 0;
+  padding: 13px 16px;
   border: 1px solid color-mix(in srgb, var(--db-interactive) 42%, var(--db-outline));
   border-radius: var(--db-radius);
   background:
@@ -168,9 +172,9 @@ html, body, [data-testid="stAppViewContainer"] {
 
 .db-alert-main h2,
 .db-intro-hero h2 {
-  margin: 7px 0 9px 0;
+  margin: 5px 0 7px 0;
   color: var(--db-text);
-  font-size: 22px;
+  font-size: 24px;
   line-height: 1.15;
   font-weight: 800;
   letter-spacing: 0;
@@ -190,7 +194,7 @@ html, body, [data-testid="stAppViewContainer"] {
   position: relative;
   padding-left: 14px;
   color: var(--db-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.45;
 }
 
@@ -207,12 +211,12 @@ html, body, [data-testid="stAppViewContainer"] {
 
 .db-alert-stats {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
 .db-alert-stat {
-  min-height: 62px;
+  min-height: 58px;
   padding: 10px;
   border: 1px solid var(--db-outline);
   border-radius: var(--db-radius);
@@ -222,7 +226,7 @@ html, body, [data-testid="stAppViewContainer"] {
 .db-alert-stat span {
   display: block;
   color: var(--db-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -232,7 +236,7 @@ html, body, [data-testid="stAppViewContainer"] {
   display: block;
   margin-top: 5px;
   color: var(--db-text);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.25;
   overflow-wrap: anywhere;
   white-space: normal;
@@ -371,7 +375,7 @@ html, body, [data-testid="stAppViewContainer"] {
 
 .db-card-title {
   margin: 0 0 7px 0;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--db-text);
   overflow-wrap: anywhere;
@@ -379,7 +383,7 @@ html, body, [data-testid="stAppViewContainer"] {
 
 .db-card-copy {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
   color: var(--db-muted);
   overflow-wrap: anywhere;
@@ -397,7 +401,7 @@ html, body, [data-testid="stAppViewContainer"] {
 .db-bullet-list li {
   position: relative;
   padding-left: 14px;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.45;
   color: var(--db-muted);
   overflow-wrap: anywhere;
@@ -416,7 +420,7 @@ html, body, [data-testid="stAppViewContainer"] {
 
 .db-card-caption {
   margin-top: 9px;
-  font-size: 11px;
+  font-size: 12px;
   color: color-mix(in srgb, var(--db-muted) 84%, white);
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -455,14 +459,14 @@ html, body, [data-testid="stAppViewContainer"] {
 
 .db-evidence-list strong {
   color: var(--db-text);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
 .db-evidence-list span {
   color: var(--db-muted);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -479,7 +483,7 @@ html, body, [data-testid="stAppViewContainer"] {
 .db-section-label {
   margin: 0 0 8px 0;
   color: var(--db-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -498,7 +502,7 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 .db-agent-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 800;
   color: var(--db-text);
 }
@@ -507,7 +511,7 @@ html, body, [data-testid="stAppViewContainer"] {
 .db-agent-evidence,
 .db-agent-handoff {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
   color: var(--db-muted);
   overflow-wrap: anywhere;
@@ -609,7 +613,7 @@ html, body, [data-testid="stAppViewContainer"] {
 
 .db-inline-metric-value {
   margin-top: 5px;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--db-text);
   overflow-wrap: anywhere;
@@ -632,7 +636,7 @@ html, body, [data-testid="stAppViewContainer"] {
   border: 1px solid var(--db-outline);
   color: var(--db-muted);
   background: color-mix(in srgb, var(--db-surface-hi) 68%, transparent);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.2;
   overflow-wrap: anywhere;
   white-space: normal;
@@ -664,7 +668,7 @@ html, body, [data-testid="stAppViewContainer"] {
 .db-story-step strong {
   display: block;
   color: var(--db-text);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.2;
 }
 
@@ -672,7 +676,7 @@ html, body, [data-testid="stAppViewContainer"] {
   display: block;
   margin-top: 4px;
   color: var(--db-muted);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.25;
 }
 
@@ -689,7 +693,7 @@ html, body, [data-testid="stAppViewContainer"] {
   padding: 9px 10px;
   background: color-mix(in srgb, var(--db-warn) 12%, transparent);
   color: var(--db-text);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.4;
 }
 
@@ -768,7 +772,7 @@ html, body, [data-testid="stAppViewContainer"] {
   padding: 8px 0;
   border-top: 1px solid var(--db-outline);
   color: var(--db-text);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -777,8 +781,9 @@ html, body, [data-testid="stAppViewContainer"] {
 [data-testid="stFormSubmitButton"] button,
 [data-testid="stBaseButton-secondary"],
 [data-testid="stBaseButton-primary"] {
-  min-height: 40px !important;
+  min-height: 44px !important;
   white-space: normal !important;
+  font-size: 15px !important;
 }
 
 [data-testid="stButton"] button p,
@@ -786,11 +791,26 @@ html, body, [data-testid="stAppViewContainer"] {
 [data-testid="stRadio"] label p {
   white-space: normal !important;
   overflow-wrap: anywhere !important;
+  font-size: 15px !important;
+}
+
+[data-testid="stWidgetLabel"] p,
+[data-testid="stSelectbox"] label p,
+[data-testid="stSlider"] label p,
+[data-testid="stTextArea"] label p {
+  color: var(--db-text) !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+}
+
+[data-baseweb="select"] div,
+[data-baseweb="textarea"] textarea {
+  font-size: 16px !important;
 }
 
 .db-map-caption {
   margin: 7px 0 16px 0;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--db-muted);
 }
 
@@ -901,6 +921,63 @@ html, body, [data-testid="stAppViewContainer"] {
 
   .db-title {
     font-size: 27px;
+  }
+}
+
+@media (min-width: 1200px) and (max-height: 700px) {
+  [data-testid="stMainBlockContainer"] {
+    padding: 18px 30px 30px 30px;
+  }
+
+  .db-hero {
+    padding: 3px 0 8px 0;
+    margin-bottom: 8px;
+  }
+
+  .db-title {
+    margin: 5px 0 0 0;
+    font-size: 24px;
+  }
+
+  .db-subtitle {
+    display: none;
+  }
+
+  .db-eyebrow {
+    padding: 4px 9px;
+    font-size: 9px;
+  }
+
+  .db-alert-strip {
+    margin: 6px 0 8px 0;
+    padding: 11px 13px;
+  }
+
+  .db-alert-main h2,
+  .db-intro-hero h2 {
+    font-size: 22px;
+  }
+
+  .db-alert-stat {
+    min-height: 54px;
+    padding: 8px;
+  }
+
+  .db-command-strip {
+    margin-top: 2px;
+  }
+
+  .db-card {
+    padding: 12px 13px;
+  }
+
+  .db-filter-row {
+    display: none;
+  }
+
+  [data-testid="stDeckGlJsonChart"],
+  [data-testid="stDeckGlJsonChart"] iframe {
+    min-height: 390px;
   }
 }
 

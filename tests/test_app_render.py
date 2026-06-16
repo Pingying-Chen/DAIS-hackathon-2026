@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import os
+
 from streamlit.testing.v1 import AppTest
 
 from src.ui.decision_options import decision_options_for_packet
+
+os.environ["DATABRICKS_WAREHOUSE_ID"] = ""
 
 
 def test_app_initial_render_is_stable() -> None:
@@ -23,6 +27,7 @@ def test_app_initial_render_is_stable() -> None:
     assert "Recommended next move" in rendered_markdown
     assert "Filters" in rendered_markdown
     assert rendered_markdown.index("Recommended next move") < rendered_markdown.index("Filters")
+    assert rendered_markdown.index("Filters") < rendered_markdown.index("District points show")
     assert "Need score:" not in rendered_markdown
     assert "Coverage gap:" not in rendered_markdown
     assert "Evidence support:" not in rendered_markdown
@@ -109,6 +114,8 @@ def test_save_review_note_view_uses_review_wording() -> None:
     )
     assert "Review note draft" in rendered_markdown
     assert "No review notes saved yet" in rendered_markdown
+    assert "Saved notes are unavailable in this session" not in visible_text
+    assert "Saved in this browser session" in rendered_markdown
     assert "Example: Verify" in app.text_area[0].value
     assert any(text_area.label == "Review note" for text_area in app.text_area)
     assert any(selectbox.label == "Follow-up status" for selectbox in app.selectbox)
@@ -116,6 +123,23 @@ def test_save_review_note_view_uses_review_wording() -> None:
     assert "Decision status" not in visible_text
     assert "Save shortlist item" not in visible_text
     assert "Save Decision" not in visible_text
+
+
+def test_compare_view_uses_compact_score_wording() -> None:
+    app = AppTest.from_file("src/app.py")
+
+    app.run(timeout=20)
+    view_selector = next(radio for radio in app.radio if radio.label == "Choose a view")
+    view_selector.set_value("Compare Anchors")
+    app.run(timeout=20)
+
+    assert not app.exception
+    rendered_markdown = "\n".join(markdown.value for markdown in app.markdown)
+    assert "/100" in rendered_markdown
+    assert "Urgency support" not in rendered_markdown
+    assert "Comparison signal" not in rendered_markdown
+    assert "on a 0-100 scale" not in rendered_markdown
+    assert "higher means better mission fit" not in rendered_markdown
 
 
 def test_product_introduction_renders_from_planner_home() -> None:

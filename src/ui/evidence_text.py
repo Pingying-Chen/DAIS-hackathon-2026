@@ -133,11 +133,22 @@ def _join_values(values: list[str]) -> str:
     clean_values = [value for value in values if value]
     if not clean_values:
         return "no readable details"
+    clean_values = [_sentence_item(value, index == 0) for index, value in enumerate(clean_values)]
     if len(clean_values) == 1:
         return clean_values[0]
     if len(clean_values) == 2:
         return f"{clean_values[0]} and {clean_values[1]}"
     return f"{', '.join(clean_values[:-1])}, and {clean_values[-1]}"
+
+
+def _sentence_item(value: str, is_first: bool) -> str:
+    text = value.strip()
+    if is_first or not text:
+        return text
+    first_word = text.split(" ", 1)[0]
+    if first_word.isupper() or any(character.isdigit() for character in first_word):
+        return text
+    return text[0].casefold() + text[1:]
 
 
 def _dedupe(values: Any) -> list[str]:

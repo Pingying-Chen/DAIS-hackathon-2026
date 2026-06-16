@@ -21,7 +21,7 @@ from src.ui.components import action_panel, bullet_card, card, card_grid, filter
 from src.ui.decision_options import decision_options_for_packet
 from src.ui.evidence_text import claim_label, evidence_sentence, source_note
 from src.ui.theme import inject_theme
-from src.viz.charts import build_confidence_chart, build_tradeoff_chart
+from src.viz.charts import build_confidence_chart
 from src.viz.maps import render_map
 
 MISSION_OPTIONS = {
@@ -193,8 +193,10 @@ def _score_text(value: Any, *, scale: str = "0-100", meaning: str = "higher mean
     try:
         number = float(value)
     except (TypeError, ValueError):
-        return f"Not available on a {scale} scale"
-    return f"{number:.0f} on a {scale} scale ({meaning})"
+        return "Not available"
+    if scale == "0-100":
+        return f"{number:.0f}/100"
+    return f"{number:.0f}"
 
 
 def _score_number(value: Any) -> float | None:
@@ -355,6 +357,18 @@ def _saved_decision_warning(message: Any) -> str:
 def _gate_summary_text(trace: list[dict[str, str]]) -> str:
     gate_counts = _gate_counts(trace)
     return f"{gate_counts['pass']} supported, {gate_counts['review']} need review, {gate_counts['block']} hold"
+
+
+def _data_coverage_text(result: dict[str, Any]) -> str:
+    coverage = result.get("data_coverage", {})
+    facility_source = _display_text(coverage.get("facility_source"), "unknown").casefold()
+    rows_considered = _score_number(coverage.get("facility_rows_considered")) or 0
+    displayed = _score_number(coverage.get("facility_rows_displayed")) or len(result.get("facilities", []))
+    if facility_source == "live":
+        return f"Live scan: {int(rows_considered):,} facility rows"
+    if facility_source == "fallback":
+        return f"Fallback sample: {int(rows_considered or displayed)} rows"
+    return f"{_plain_label(facility_source, 'Unknown source')}: {int(rows_considered or displayed)} rows"
 
 
 def _saved_decisions_status() -> str:
@@ -663,16 +677,13 @@ def _render_top_controls() -> tuple[str, str, str, str, bool]:
             "<section class='db-command-strip'>"
             "<div>"
             "<div class='db-section-label'>Filters</div>"
-            "<p>Where should this specialty team go next, and what needs verification before action?</p>"
             "</div>"
-            "<div class='db-command-note'>Use these filters to narrow the care need and place. The recommendation, map, and evidence update together.</div>"
             "</section>"
         ),
         unsafe_allow_html=True,
     )
 
-    st.markdown("<div class='db-section-label'>Choose the situation</div>", unsafe_allow_html=True)
-    cols = st.columns([1.1, 1, 1, 1], gap="medium")
+    cols = st.columns([1.04, 0.98, 0.98, 0.92, 0.84, 0.66], gap="medium")
     with cols[0]:
         mission_key = st.selectbox("Care need", list(MISSION_OPTIONS), format_func=MISSION_OPTIONS.get, key="mission_key")
     with cols[1]:
@@ -683,17 +694,17 @@ def _render_top_controls() -> tuple[str, str, str, str, bool]:
             st.session_state.district_focus = ALL_DISTRICTS_LABEL
         district_focus = st.selectbox("District", district_options, key="district_focus")
     with cols[3]:
-        confidence_label = st.select_slider("Minimum certainty", options=list(CONFIDENCE_OPTIONS), key="confidence_label")
-
-    action_cols = st.columns([0.72, 0.28], gap="medium")
-    with action_cols[0]:
+        confidence_label = st.selectbox("Minimum certainty", list(CONFIDENCE_OPTIONS), key="confidence_label")
+    with cols[4]:
+        st.markdown("<div class='db-control-spacer'></div>", unsafe_allow_html=True)
         run_button = st.button(
             "Build Referral Plan",
             type="primary",
             on_click=_build_filtered_plan,
             width="stretch",
         )
-    with action_cols[1]:
+    with cols[5]:
+        st.markdown("<div class='db-control-spacer'></div>", unsafe_allow_html=True)
         clear_button = st.button("Clear Filters", width="stretch")
 
     if clear_button:
@@ -739,7 +750,6 @@ def _show_national_alert(result: dict[str, Any] | None) -> None:
     lead_district = _display_text(packet.get("lead_district"), "No district selected")
     lead_state = _display_text(packet.get("lead_state"), "")
     action = _decision_label(packet.get("action_state", "verify first"))
-    warning = _short_status(result["warnings"][0]) if result.get("warnings") else "No blocking warning in the national scan."
     next_action = _display_text(packet.get("next_verification_action"), "Review the packet before saving.")
     lead_anchor = _display_text(packet.get("lead_anchor"), "No lead anchor selected")
     confidence = _confidence_label(packet.get("confidence", result.get("confidence_label", "Weak Evidence")))
@@ -747,8 +757,6 @@ def _show_national_alert(result: dict[str, Any] | None) -> None:
     location = f"{lead_district}, {lead_state}".strip().strip(",")
 
     alert_items = [
-        f"Start with {location} for {result['mission_label']}.",
-        warning,
         next_action,
     ]
     list_html = "".join(f"<li>{escape(item)}</li>" for item in alert_items if item)
@@ -760,10 +768,9 @@ def _show_national_alert(result: dict[str, Any] | None) -> None:
             "</div>"
         )
         for label, value in [
-            ("Action", action),
+            ("Data used", _data_coverage_text(result)),
             ("Lead anchor", lead_anchor),
             ("Confidence", confidence),
-            ("Recommendation support", _gate_summary_text(trace)),
             ("Citations", citation_status),
         ]
     )
@@ -1204,10 +1211,15 @@ def _citation_display(citations: pd.DataFrame) -> pd.DataFrame:
     if citations.empty:
         return pd.DataFrame(columns=["Claim", "Evidence", "Source"])
     display = citations.copy()
+    claim_values = display.get("claim_type", pd.Series([""] * len(display), dtype=str))
+    evidence_values = display.get("evidence", pd.Series([""] * len(display), dtype=str))
     return pd.DataFrame(
         {
-            "Claim": display.get("claim_type", pd.Series(dtype=str)).apply(_plain_label),
-            "Evidence": display.get("evidence", pd.Series(dtype=str)).apply(lambda value: _display_text(value, "Evidence text not available")),
+            "Claim": claim_values.apply(_plain_label),
+            "Evidence": [
+                evidence_sentence(claim_type, evidence)
+                for claim_type, evidence in zip(claim_values, evidence_values, strict=False)
+            ],
             "Source": display.get("source_url", pd.Series(dtype=str)).apply(lambda value: _display_text(value, "Source link not available")),
         }
     )
@@ -1284,6 +1296,8 @@ def _web_evidence_display(search_results: pd.DataFrame) -> pd.DataFrame:
 
 
 def _show_overview(result: dict[str, Any]) -> None:
+    _render_top_controls()
+
     districts = result["districts"]
     facilities = result["facilities"]
     trust_reviews = result["trust_reviews"]
@@ -1463,9 +1477,6 @@ def _show_anchors(result: dict[str, Any]) -> None:
             if not facility_citations.empty:
                 _render_citation_notes(facility_citations)
 
-    _show_compare(result)
-
-
 def _show_trust_desk(result: dict[str, Any]) -> None:
     trust_reviews = result["trust_reviews"]
     if trust_reviews is None or trust_reviews.empty:
@@ -1498,33 +1509,6 @@ def _show_trust_desk(result: dict[str, Any]) -> None:
                 height=180,
             )
 
-
-def _show_compare(result: dict[str, Any]) -> None:
-    facilities = result["facilities"].head(2)
-    if len(facilities) < 2:
-        st.info("Compare view unlocks when at least two facility candidates are available.")
-        return
-
-    chart = build_tradeoff_chart(facilities)
-    if chart is not None:
-        chart.update_layout(height=300, margin=dict(l=8, r=8, t=8, b=8))
-        st.plotly_chart(chart, width="stretch")
-
-    left, right = st.columns(2, gap="large")
-    for column, row in zip((left, right), facilities.itertuples(index=False), strict=False):
-        with column:
-            card(
-                row.name,
-                (
-                    f"{row.address_city}, {row.address_stateOrRegion}. "
-                    f"Urgency support {_score_text(row.urgency_support, meaning='higher means the district need better supports this option')}. "
-                    f"Facility fit {_score_text(row.capability_fit, meaning='higher means better mission fit')}. "
-                    f"Evidence certainty: {_confidence_label(row.confidence_label)}."
-                ),
-                row.risk_flags or "No additional review flags.",
-            )
-
-
 def _show_shortlist(result: dict[str, Any]) -> None:
     saved = _saved_decisions(limit=8)
     top_facility = result["facilities"].head(1)
@@ -1541,7 +1525,7 @@ def _show_shortlist(result: dict[str, Any]) -> None:
             card(
                 "No review notes saved yet",
                 "Save what the team should verify before shortlisting this facility.",
-                "Review notes appear here after saving.",
+                "Saved in this browser session when Lakebase is not configured.",
             )
 
     with right:
@@ -1612,7 +1596,11 @@ def _show_shortlist(result: dict[str, Any]) -> None:
                     note=note,
                     metadata=payload,
                 )
-            st.session_state.save_feedback = "Review note saved."
+            st.session_state.save_feedback = (
+                "Review note saved."
+                if saved_ok
+                else "Review note saved in this browser session."
+            )
             st.rerun()
 
 
@@ -1692,23 +1680,18 @@ if st.session_state.get("control_surface_version") != "product-usability":
     st.session_state.stage_view_radio = "Plan"
 
 _hero()
-_render_page_jump()
 _ensure_national_result()
 
 if st.session_state.app_page == APP_PAGE_INTRO:
+    _render_page_jump()
     _show_product_intro_page(st.session_state.get("national_result"))
     _render_footer()
     st.stop()
 
 _apply_pending_map_jump()
-_show_national_alert(st.session_state.get("national_result"))
 
 result = st.session_state.latest_result or st.session_state.get("national_result")
-_summary_metrics(result)
-
-mission_key, state_focus, district_focus, confidence_label, run_button = _render_top_controls()
-if run_button:
-    result = st.session_state.latest_result or st.session_state.get("national_result")
+_show_national_alert(result)
 
 if result is None:
     _show_empty_state()
@@ -1716,4 +1699,5 @@ else:
     selected_view = _stage_selector()
     _render_stage(selected_view, result)
 
+_render_page_jump()
 _render_footer()
