@@ -15,3 +15,5 @@ env:
     value: "virtue_foundation_dataset"
   - name: ENTITY_INDEX_TABLE
     value: "workspace.default.care_convoy_facility_entity_index"
+  - name: SCORING_TABLE
+    value: "workspace.default.care_convoy_facility_scoring"

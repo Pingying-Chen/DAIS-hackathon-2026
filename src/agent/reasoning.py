@@ -539,6 +539,10 @@ def run_agent(
     search_results = _frame_attr(facilities, "search_results")
     district_source = _result_source(districts)
     facility_source = _result_source(facilities)
+    cache_sources = {
+        "scoring": _frame_attr(facilities, "scoring_source") or "runtime",
+        "entity_resolution": _frame_attr(facilities, "entity_index_source") or "runtime",
+    }
     top_district = districts.iloc[0].to_dict() if not districts.empty else None
     top_facility = facilities.iloc[0].to_dict() if not facilities.empty else None
     top_trust_review = _matching_trust_review(trust_reviews, top_facility)
@@ -636,6 +640,7 @@ def run_agent(
         "board_summary": board_summary,
         "warnings": warnings,
         "provenance": provenance,
+        "cache_sources": cache_sources,
         "observability": {
             "mlflow": tracing_status(),
         },

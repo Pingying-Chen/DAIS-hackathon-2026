@@ -20,6 +20,7 @@ CATALOG = os.environ.get("HACKATHON_CATALOG", "databricks_virtue_foundation_data
 SCHEMA = os.environ.get("HACKATHON_SCHEMA", "virtue_foundation_dataset")
 FACILITY_CANDIDATE_WINDOW = 160
 ENTITY_INDEX_VERSION = "care-convoy-entity-index-v1"
+SCORING_VERSION = "care-convoy-scoring-v1"
 ENTITY_RESOLUTION_PAIRWISE_LIMIT = 350
 ENTITY_RESOLUTION_MAX_BLOCK_SIZE = 250
 _SQL_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -131,6 +132,21 @@ ENTITY_INDEX_COLUMNS = [
     "source_table",
     "built_at",
 ]
+SCORING_COLUMNS = [
+    "scoring_version",
+    "facility_id",
+    "facility_name",
+    "candidate_seed_score",
+    "evidence_count",
+    "capability_fit",
+    "dataset_trust_score",
+    "freshness_signal",
+    "confidence_label",
+    "risk_flags",
+    "source_row_fingerprint",
+    "source_table",
+    "built_at",
+]
 SOURCE_ROW_FINGERPRINT_COLUMNS = FACILITY_TEXT_COLUMNS
 _CACHED_ENTITY_COLUMNS = [
     "resolved_entity_id",
@@ -211,6 +227,16 @@ def _tag_source(df: pd.DataFrame, source: str) -> pd.DataFrame:
 
 def entity_index_table_name(value: str | None = None) -> str:
     raw_table = (value if value is not None else os.environ.get("ENTITY_INDEX_TABLE", "")).strip()
+    if not raw_table:
+        return ""
+    parts = raw_table.split(".")
+    if len(parts) != 3 or not all(_SQL_IDENTIFIER_PATTERN.fullmatch(part) for part in parts):
+        return ""
+    return ".".join(parts)
+
+
+def scoring_table_name(value: str | None = None) -> str:
+    raw_table = (value if value is not None else os.environ.get("SCORING_TABLE", "")).strip()
     if not raw_table:
         return ""
     parts = raw_table.split(".")
@@ -780,6 +806,53 @@ def get_district_priorities(
     )
 
 
+def _candidate_seed_score_from_row(row: pd.Series) -> float:
+    score = (
+        _parse_number(row.get("evidence_count")) * 12
+        + _parse_number(row.get("numberDoctors")) * 0.7
+        + _parse_number(row.get("capacity")) * 0.08
+        + _parse_number(row.get("distinct_social_media_presence_count")) * 14
+        + _parse_number(row.get("affiliated_staff_presence")) * 18
+        + _parse_number(row.get("custom_logo_presence")) * 10
+    )
+    return round(float(score), 4)
+
+
+def _apply_cached_score_columns(df: pd.DataFrame) -> pd.DataFrame:
+    cached_numeric_columns = {
+        "cached_candidate_seed_score": "candidate_seed_score",
+        "cached_evidence_count": "evidence_count",
+        "cached_capability_fit": "capability_fit",
+        "cached_dataset_trust_score": "dataset_trust_score",
+        "cached_freshness_signal": "freshness_signal",
+    }
+    for cached_column, target_column in cached_numeric_columns.items():
+        if cached_column not in df:
+            continue
+        cached_values = pd.to_numeric(df[cached_column], errors="coerce")
+        df[target_column] = cached_values.where(cached_values.notna(), df[target_column])
+
+    if "cached_confidence_label" in df:
+        cached_labels = df["cached_confidence_label"].fillna("").astype(str).str.strip()
+        df["confidence_label"] = cached_labels.where(cached_labels.ne(""), df["confidence_label"])
+    if "cached_score_risk_flags" in df:
+        cached_flags = df["cached_score_risk_flags"].fillna("").astype(str).str.strip()
+        df["risk_flags"] = cached_flags.where(cached_flags.ne(""), df["risk_flags"])
+    return df
+
+
+def _scoring_cache_source(df: pd.DataFrame) -> str:
+    if df.empty or "scoring_version" not in df:
+        return "runtime"
+    cached_versions = df["scoring_version"].fillna("").astype(str).str.strip()
+    cached_count = int(cached_versions.ne("").sum())
+    if cached_count == 0:
+        return "runtime"
+    if cached_count == len(df):
+        return "cached"
+    return "partial"
+
+
 def _clean_facility_candidates(raw: pd.DataFrame) -> pd.DataFrame:
     df = raw.rename(columns=str).copy()
     for column in FACILITY_TEXT_COLUMNS + FACILITY_NUMERIC_COLUMNS:
@@ -835,7 +908,8 @@ def _clean_facility_candidates(raw: pd.DataFrame) -> pd.DataFrame:
     df["urgency_support"] = (df["capability_fit"] * 0.55 + df["dataset_trust_score"] * 0.45).clip(0, 100)
     df["confidence_label"] = df["dataset_trust_score"].apply(_facility_confidence_label)
     df["risk_flags"] = df.apply(_facility_risk_flags, axis=1)
-    return df
+    df["candidate_seed_score"] = df.apply(_candidate_seed_score_from_row, axis=1)
+    return _apply_cached_score_columns(df)
 
 
 def _entity_match(left: pd.Series, right: pd.Series) -> tuple[float, list[str]]:
@@ -1154,6 +1228,128 @@ def build_entity_index_frame(raw: pd.DataFrame) -> pd.DataFrame:
         .reset_index(drop=True)
     )
     return index[ENTITY_INDEX_COLUMNS]
+
+
+def build_facility_scoring_frame(raw: pd.DataFrame) -> pd.DataFrame:
+    cleaned = _clean_facility_candidates(raw)
+    built_at = datetime.now(timezone.utc).isoformat()
+    scoring = pd.DataFrame(
+        {
+            "scoring_version": SCORING_VERSION,
+            "facility_id": cleaned["unique_id"].apply(_safe_text),
+            "facility_name": cleaned["name"].apply(_safe_text),
+            "candidate_seed_score": pd.to_numeric(cleaned["candidate_seed_score"], errors="coerce").fillna(0.0),
+            "evidence_count": pd.to_numeric(cleaned["evidence_count"], errors="coerce").fillna(0).astype(int),
+            "capability_fit": pd.to_numeric(cleaned["capability_fit"], errors="coerce").fillna(0.0),
+            "dataset_trust_score": pd.to_numeric(cleaned["dataset_trust_score"], errors="coerce").fillna(0.0),
+            "freshness_signal": pd.to_numeric(cleaned["freshness_signal"], errors="coerce").fillna(0.0),
+            "confidence_label": cleaned["confidence_label"].apply(_safe_text),
+            "risk_flags": cleaned["risk_flags"].apply(_safe_text),
+            "source_row_fingerprint": cleaned.apply(_source_row_fingerprint, axis=1),
+            "source_table": _unity_catalog_uri("facilities"),
+            "built_at": built_at,
+        }
+    )
+    scoring = (
+        scoring.sort_values(["candidate_seed_score", "facility_name"], ascending=[False, True])
+        .drop_duplicates(["facility_id", "source_row_fingerprint"])
+        .sort_values(["facility_name", "facility_id"])
+        .reset_index(drop=True)
+    )
+    return scoring[SCORING_COLUMNS]
+
+
+def _mapping_feedback_key(row: pd.Series) -> tuple[str, str, str]:
+    return (
+        _safe_text(row.get("entity_index_version")),
+        _safe_text(row.get("facility_id")),
+        _safe_text(row.get("source_row_fingerprint")),
+    )
+
+
+def _mapping_feedback_text_similarity(candidate: pd.Series, existing: pd.Series) -> float:
+    candidate_text = _safe_text(candidate.get("entity_search_text")).lower()
+    existing_text = _safe_text(existing.get("entity_search_text")).lower()
+    if not candidate_text or not existing_text:
+        return 0.0
+    return SequenceMatcher(None, candidate_text[:1200], existing_text[:1200]).ratio()
+
+
+def _mapping_feedback_match(candidate: pd.Series, existing: pd.DataFrame) -> tuple[pd.Series | None, str]:
+    if existing.empty:
+        return None, ""
+
+    candidate_id = _safe_text(candidate.get("facility_id"))
+    if candidate_id and "facility_id" in existing:
+        exact_id = existing[existing["facility_id"].fillna("").astype(str).str.strip().eq(candidate_id)]
+        if not exact_id.empty:
+            return exact_id.iloc[0], "existing facility id"
+
+    candidate_name = _normalized_name(candidate.get("facility_name"))
+    candidate_city = _location_key(candidate.get("address_city"))
+    candidate_state = _location_key(candidate.get("address_stateOrRegion"))
+    candidate_postcode = _location_key(candidate.get("address_zipOrPostcode"))
+    candidate_domain = _entity_domain(candidate.get("website_domain"))
+
+    for _, existing_row in existing.iterrows():
+        existing_name = _normalized_name(existing_row.get("facility_name") or existing_row.get("canonical_name"))
+        existing_city = _location_key(existing_row.get("address_city"))
+        existing_state = _location_key(existing_row.get("address_stateOrRegion"))
+        existing_postcode = _location_key(existing_row.get("address_zipOrPostcode"))
+        existing_domain = _entity_domain(existing_row.get("website_domain"))
+        same_name = bool(candidate_name and existing_name and candidate_name == existing_name)
+        same_location = bool(
+            (candidate_city and candidate_city == existing_city)
+            or (candidate_postcode and candidate_postcode == existing_postcode)
+            or (candidate_state and candidate_state == existing_state)
+        )
+        if same_name and same_location:
+            return existing_row, "exact canonical name and location"
+        if candidate_domain and candidate_domain == existing_domain and (same_name or same_location):
+            return existing_row, "shared website domain"
+        if _mapping_feedback_text_similarity(candidate, existing_row) >= 0.92:
+            return existing_row, "search-text similarity"
+    return None, ""
+
+
+def _reuse_mapping(candidate: pd.Series, existing: pd.Series, reason: str) -> dict[str, Any]:
+    reused = candidate.to_dict()
+    reused["resolved_entity_id"] = _safe_text(existing.get("resolved_entity_id")) or _safe_text(candidate.get("resolved_entity_id"))
+    reused["canonical_name"] = _safe_text(existing.get("canonical_name")) or _safe_text(candidate.get("canonical_name"))
+    reused["entity_record_count"] = max(int(_parse_number(existing.get("entity_record_count"))), int(_parse_number(candidate.get("entity_record_count"))), 1)
+    reused["entity_match_confidence"] = max(
+        _parse_number(existing.get("entity_match_confidence")),
+        _parse_number(candidate.get("entity_match_confidence")),
+        0.92,
+    )
+    reused["entity_match_reasons"] = f"feedback loop reused cached mapping: {reason}"
+    reused["duplicate_review_required"] = _truthy_value(existing.get("duplicate_review_required")) or _truthy_value(
+        candidate.get("duplicate_review_required")
+    )
+    return reused
+
+
+def build_entity_resolution_feedback_frame(candidate_index: pd.DataFrame, existing_index: pd.DataFrame) -> pd.DataFrame:
+    if candidate_index.empty:
+        return candidate_index.copy()
+    if existing_index.empty:
+        return candidate_index.drop_duplicates(["entity_index_version", "facility_id", "source_row_fingerprint"]).reset_index(drop=True)
+
+    existing_keys = {_mapping_feedback_key(row) for _, row in existing_index.iterrows()}
+    rows: list[dict[str, Any]] = []
+    for _, candidate in candidate_index.iterrows():
+        if _mapping_feedback_key(candidate) in existing_keys:
+            continue
+        existing, reason = _mapping_feedback_match(candidate, existing_index)
+        if existing is not None:
+            rows.append(_reuse_mapping(candidate, existing, reason))
+        else:
+            rows.append(candidate.to_dict())
+    if not rows:
+        return pd.DataFrame(columns=ENTITY_INDEX_COLUMNS)
+    return pd.DataFrame(rows, columns=ENTITY_INDEX_COLUMNS).drop_duplicates(
+        ["entity_index_version", "facility_id", "source_row_fingerprint"]
+    )
 
 
 def _search_result_match_score(entity: pd.Series, result: pd.Series) -> float:
@@ -1539,12 +1735,14 @@ def _attach_artifacts(
     search_results: pd.DataFrame,
     website_signals: pd.DataFrame,
     entity_index_source: str,
+    scoring_source: str,
 ) -> pd.DataFrame:
     tagged = _tag_source(df, source)
     tagged.attrs["trust_reviews"] = trust_reviews
     tagged.attrs["search_results"] = search_results
     tagged.attrs["website_signals"] = website_signals
     tagged.attrs["entity_index_source"] = entity_index_source
+    tagged.attrs["scoring_source"] = scoring_source
     return tagged
 
 
@@ -1555,6 +1753,7 @@ def _build_facility_review_frame(
     allow_web_enrichment: bool,
 ) -> pd.DataFrame:
     cleaned = _clean_facility_candidates(base)
+    scoring_source = _scoring_cache_source(cleaned)
     resolved, entity_index_source = _resolve_entity_frame(cleaned)
     search_results = search_facility_sources(resolved, allow_search=allow_web_enrichment)
     website_signals = collect_website_signals(resolved, search_results, allow_web_enrichment=allow_web_enrichment)
@@ -1617,6 +1816,7 @@ def _build_facility_review_frame(
         filtered_search,
         filtered_signals,
         entity_index_source,
+        scoring_source,
     )
 
 
@@ -1670,15 +1870,21 @@ def _facility_candidate_sql(
     district_clause: str,
     *,
     use_entity_index: bool,
+    use_scoring_cache: bool,
 ) -> str:
     entity_table = entity_index_table_name()
     if use_entity_index and not entity_table:
         return ""
 
-    table_alias = "f." if use_entity_index else ""
+    score_table = scoring_table_name()
+    if use_scoring_cache and not score_table:
+        use_scoring_cache = False
+
+    table_alias = "f." if use_entity_index or use_scoring_cache else ""
     keyword_filter = _keyword_sql(mission_type, table_alias)
     candidate_seed_score = _candidate_seed_score_sql(table_alias)
     select_list = _facility_select_list(table_alias)
+    joins: list[str] = []
     if use_entity_index:
         select_list = (
             select_list
@@ -1694,20 +1900,52 @@ def _facility_candidate_sql(
       ei.entity_index_version
     """
         )
-        from_clause = f"""
-    from {CATALOG}.{SCHEMA}.facilities f
+        joins.append(
+            f"""
     left join {entity_table} ei
       on cast(f.unique_id as string) = ei.facility_id
       and ei.entity_index_version = '{ENTITY_INDEX_VERSION}'
       and ei.source_row_fingerprint = {_source_row_fingerprint_sql("f.")}
+    """
+        )
+    if use_scoring_cache:
+        select_list = (
+            select_list
+            + f""",
+      sc.scoring_version,
+      sc.candidate_seed_score as cached_candidate_seed_score,
+      sc.evidence_count as cached_evidence_count,
+      sc.capability_fit as cached_capability_fit,
+      sc.dataset_trust_score as cached_dataset_trust_score,
+      sc.freshness_signal as cached_freshness_signal,
+      sc.confidence_label as cached_confidence_label,
+      sc.risk_flags as cached_score_risk_flags,
+      sc.source_row_fingerprint as scoring_source_row_fingerprint
+    """
+        )
+        joins.append(
+            f"""
+    left join {score_table} sc
+      on cast(f.unique_id as string) = sc.facility_id
+      and sc.scoring_version = '{SCORING_VERSION}'
+      and sc.source_row_fingerprint = {_source_row_fingerprint_sql("f.")}
+    """
+        )
+
+    if use_entity_index or use_scoring_cache:
+        from_clause = f"""
+    from {CATALOG}.{SCHEMA}.facilities f
+    {''.join(joins)}
         """
+        candidate_seed_select = f"coalesce(sc.candidate_seed_score, {candidate_seed_score})" if use_scoring_cache else candidate_seed_score
     else:
         from_clause = f"from {CATALOG}.{SCHEMA}.facilities"
+        candidate_seed_select = candidate_seed_score
 
     return f"""
     select
       {select_list},
-      {candidate_seed_score} as candidate_seed_score
+      {candidate_seed_select} as candidate_seed_score
     {from_clause}
     where ({state_clause})
       and ({district_clause})
@@ -1737,25 +1975,32 @@ def get_facility_candidates(
         )
         parameters["district_filter"] = f"%{district_filter}%"
 
-    cached_state_clause = state_clause.replace("address_stateOrRegion", "f.address_stateOrRegion")
-    cached_district_clause = district_clause.replace("address_city", "f.address_city").replace(
+    aliased_state_clause = state_clause.replace("address_stateOrRegion", "f.address_stateOrRegion")
+    aliased_district_clause = district_clause.replace("address_city", "f.address_city").replace(
         "address_zipOrPostcode", "f.address_zipOrPostcode"
     )
-    cached_sql = _facility_candidate_sql(
-        mission_type,
-        cached_state_clause,
-        cached_district_clause,
-        use_entity_index=True,
-    )
-    raw = run_sql(cached_sql, parameters=parameters) if cached_sql else pd.DataFrame()
-    if raw.empty:
+    score_cache_enabled = bool(scoring_table_name())
+    attempts = [
+        (True, score_cache_enabled, aliased_state_clause, aliased_district_clause),
+    ]
+    if score_cache_enabled:
+        attempts.append((True, False, aliased_state_clause, aliased_district_clause))
+        attempts.append((False, True, aliased_state_clause, aliased_district_clause))
+    attempts.append((False, False, state_clause, district_clause))
+    raw = pd.DataFrame()
+    for use_entity_index, use_scoring_cache, attempt_state_clause, attempt_district_clause in attempts:
         sql = _facility_candidate_sql(
             mission_type,
-            state_clause,
-            district_clause,
-            use_entity_index=False,
+            attempt_state_clause,
+            attempt_district_clause,
+            use_entity_index=use_entity_index,
+            use_scoring_cache=use_scoring_cache,
         )
+        if not sql:
+            continue
         raw = run_sql(sql, parameters=parameters)
+        if not raw.empty:
+            break
     if raw.empty:
         return _build_facility_review_frame(
             _fallback_facilities(state_filter),

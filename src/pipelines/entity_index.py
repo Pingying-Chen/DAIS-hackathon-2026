@@ -16,6 +16,7 @@ from src.agent.tools import (
     FACILITY_NUMERIC_COLUMNS,
     FACILITY_TEXT_COLUMNS,
     SCHEMA,
+    build_entity_resolution_feedback_frame,
     build_entity_index_frame,
     entity_index_table_name,
 )
@@ -188,6 +189,42 @@ def _insert_batches(
         )
 
 
+def _existing_rows_sql(table_name: str) -> str:
+    return f"""
+    select
+      entity_index_version,
+      facility_id,
+      facility_name,
+      resolved_entity_id,
+      canonical_name,
+      entity_record_count,
+      entity_match_confidence,
+      entity_match_reasons,
+      duplicate_review_required,
+      cast('' as string) as entity_search_text,
+      address_city,
+      address_stateOrRegion,
+      address_zipOrPostcode,
+      website_domain,
+      primary_source_url,
+      source_row_fingerprint,
+      source_table,
+      built_at
+    from {table_name}
+    where entity_index_version = '{ENTITY_INDEX_VERSION}'
+    """
+
+
+def _load_existing_rows(table_name: str) -> pd.DataFrame:
+    existing = run_sql(_existing_rows_sql(table_name), timeout_seconds=20)
+    if existing.empty:
+        return pd.DataFrame(columns=ENTITY_INDEX_COLUMNS)
+    for column in ENTITY_INDEX_COLUMNS:
+        if column not in existing:
+            existing[column] = None
+    return existing[ENTITY_INDEX_COLUMNS]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build the cached Care Convoy facility entity index table.")
     parser.add_argument(
@@ -204,6 +241,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=50)
     parser.add_argument("--page-size", type=int, default=1000)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--full-refresh", action="store_true")
     return parser.parse_args()
 
 
@@ -227,8 +265,12 @@ def main() -> int:
         return 1
 
     index = build_entity_index_frame(raw)
+    existing = pd.DataFrame(columns=ENTITY_INDEX_COLUMNS) if args.full_refresh else _load_existing_rows(table_name)
+    append_frame = index if args.full_refresh else build_entity_resolution_feedback_frame(index, existing)
+    skipped_count = len(index) - len(append_frame)
     print(f"Built {len(index)} entity-index rows with version {ENTITY_INDEX_VERSION}.")
-    print(index[["facility_id", "facility_name", "resolved_entity_id", "entity_record_count"]].head(5).to_string(index=False))
+    print(f"Existing exact mapping rows skipped: {skipped_count}. New or reused mapping rows to append: {len(append_frame)}.")
+    print(append_frame[["facility_id", "facility_name", "resolved_entity_id", "entity_record_count"]].head(5).to_string(index=False))
     if args.dry_run:
         return 0
 
@@ -237,9 +279,11 @@ def main() -> int:
     _execute_sql(client, args.warehouse_id, f"create schema if not exists {catalog}.{schema}")
     _execute_sql(client, args.warehouse_id, _create_table_sql(table_name))
     _add_missing_column(client, args.warehouse_id, table_name, "source_row_fingerprint string")
-    _execute_sql(client, args.warehouse_id, f"delete from {table_name} where entity_index_version = '{ENTITY_INDEX_VERSION}'")
-    _insert_batches(client, args.warehouse_id, table_name, index, max(args.batch_size, 1))
-    print(f"Published {len(index)} rows to {table_name}.")
+    if args.full_refresh:
+        _execute_sql(client, args.warehouse_id, f"delete from {table_name} where entity_index_version = '{ENTITY_INDEX_VERSION}'")
+    if not append_frame.empty:
+        _insert_batches(client, args.warehouse_id, table_name, append_frame, max(args.batch_size, 1))
+    print(f"Published {len(append_frame)} new entity-index rows to {table_name}.")
     return 0
 
 

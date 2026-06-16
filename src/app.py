@@ -97,8 +97,9 @@ GATE_TONES = {
 RUN_STEPS = [
     ("Need Scout", "Loaded NFHS district indicators and scored need."),
     ("Supply Mapper", "Joined facility density through pincode and district context."),
+    ("Score Cache", "Used cached facility scoring when a fingerprinted row was available."),
     ("Facility Scout", "Ranked lead and backup referral anchors from provided facilities."),
-    ("Trust Verifier", "Checked entity resolution, website status, and trust signals."),
+    ("Trust Verifier", "Checked cached entity mapping, website status, and trust signals."),
     ("Evidence Auditor", "Checked citation rows and uncertainty downgrades."),
     ("Mission Strategist", "Converted gate outcomes into an operator-ready mission action."),
     ("Supervisor", "Derived the mission packet action from the weakest gate."),
@@ -155,7 +156,7 @@ def _short_status(message: str) -> str:
 
 def _hero() -> None:
     hero_header(
-        eyebrow="Track 3 Referral Copilot · v6 operator view",
+        eyebrow="Track 3 Referral Copilot · v7 feedback-cache view",
         title="Care Convoy",
         subtitle="Choose the next referral move in India. See the reason, the evidence, and the action before saving a decision.",
         chips=[
@@ -514,10 +515,11 @@ def _show_judge_page(national_result: dict[str, Any] | None) -> None:
     with tabs[1]:
         steps = [
             ("1", "Unity Catalog", "Reads facilities, NFHS district health indicators, and India pincode geography from the provided dataset."),
-            ("2", "SQL Warehouse", "Scores district need, facility density, and candidate anchors without moving the source of truth."),
-            ("3", "Trust Desk", "Checks duplicate risk, website status, source URLs, and lead-anchor citations."),
-            ("4", "Agent Gates", "Seven pass, review, or block gates convert evidence into shortlist, verify-first, or hold guidance."),
-            ("5", "Lakebase + MLflow", "Saves the operator decision and records observability and evaluation proof for judges."),
+            ("2", "Append-Only Score Cache", "Stores deterministic facility scores by source fingerprint and appends only new scoring rows."),
+            ("3", "Entity Feedback Loop", "Checks exact mappings first, then similar search text or vector-search-ready text before appending a new mapping."),
+            ("4", "Trust Desk", "Checks duplicate risk, website status, source URLs, and lead-anchor citations."),
+            ("5", "Agent Gates", "Seven pass, review, or block gates convert evidence into shortlist, verify-first, or hold guidance."),
+            ("6", "Lakebase + MLflow", "Saves the operator decision and records observability and evaluation proof for judges."),
         ]
         step_html = "".join(
             (
@@ -535,6 +537,7 @@ def _show_judge_page(national_result: dict[str, Any] | None) -> None:
             [
                 "No travel-time routing denominator is active.",
                 "Population context is planned, not used for ranking.",
+                "Cached scoring and mapping tables are derived optimizations, not new sources of truth.",
                 "Weak source evidence is downgraded instead of hidden.",
                 "The provided facility dataset remains the source of truth.",
             ],
@@ -543,10 +546,11 @@ def _show_judge_page(national_result: dict[str, Any] | None) -> None:
             [
                 {"title": "Databricks App", "body": "Streamlit presentation surface.", "caption": "Judges see the real app."},
                 {"title": "Provided tables", "body": "Facilities, NFHS, and pincodes.", "caption": "Virtue dataset remains primary."},
-                {"title": "Entity index", "body": "Cached from facilities only.", "caption": "Optimization, not a new source."},
+                {"title": "Score cache", "body": "Append-only facility scoring.", "caption": "New fingerprints only."},
+                {"title": "Entity map", "body": "Exact or similar lookup before append.", "caption": "Optimization, not a new source."},
                 {"title": "Persistence", "body": "Lakebase shortlist readback.", "caption": "The action survives interaction."},
             ],
-            columns=4,
+            columns=5,
         )
 
     with tabs[2]:
@@ -610,14 +614,14 @@ def _show_judge_page(national_result: dict[str, Any] | None) -> None:
             columns=4,
         )
         bullet_card(
-            "Version 6 focus",
+            "Version 7 focus",
             [
-                "Operator home is simplified around the recommended action.",
-                "Judge/backend material is moved to this proof room.",
-                "The demo path is visible inside the app.",
-                "The existing scoring, evidence, and persistence backend remains unchanged.",
+                "Version 6 simplified the operator home around the recommended action.",
+                "Version 7 adds append-only scoring and entity-mapping caches for faster app reads.",
+                "The demo path remains visible inside the app.",
+                "The provided dataset still owns every recommendation and citation.",
             ],
-            "This slice improves presentation without changing the data contract.",
+            "The v7 slice changes derived-cache behavior, not the source of truth.",
         )
 
 
@@ -709,12 +713,15 @@ def _show_mission_control(result: dict[str, Any]) -> None:
 
     with right:
         action = str(packet.get("action_state", "review")).title()
+        cache_sources = result.get("cache_sources", {})
         bullet_card(
             f"Supervisor action: {action}",
             [
                 f"Next: {packet.get('next_verification_action', result.get('board_summary', 'Review first.'))}",
                 f"Confidence: {packet.get('confidence', result.get('confidence_label', 'Weak Evidence'))}",
                 f"Citations: {packet.get('citation_status', 'unknown')}",
+                f"Score cache: {cache_sources.get('scoring', 'runtime')}",
+                f"Entity map: {cache_sources.get('entity_resolution', 'runtime')}",
             ],
             "Review before saving.",
         )
@@ -1104,6 +1111,7 @@ def _show_shortlist(result: dict[str, Any]) -> None:
                 "board_agents": [agent["agent"] for agent in board_agents],
                 "mission_packet": result.get("mission_packet", {}),
                 "mission_control_trace": result.get("mission_control_trace", []),
+                "cache_sources": result.get("cache_sources", {}),
             }
             from src.agent.tools import save_user_decision
 
