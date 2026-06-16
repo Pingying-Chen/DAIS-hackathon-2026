@@ -68,17 +68,16 @@ From here, the README is judge-facing: it maps the project to the hackathon trac
 
 </details>
 
-## Why Care Convoy Is Strong
+## What Care Convoy Helps You Do
 
-- **Referral Mission Planner:** ranks districts and candidate facility anchors for the selected care need.
-- **NFHS-backed need context:** uses district health indicators so the plan reflects demand, not only facility supply.
-- **Facility-density context:** reconciles facility and pincode data to make thin supply visible at district level.
-- **Trust Desk:** uses a cached facility entity index when available, falls back to runtime entity resolution when needed, checks website evidence, and calculates trust-supported recommendation signals.
-- **Evidence Ledger:** shows source-backed facility text and Unity Catalog provenance rows for important claims.
-- **Mission Control v5.4:** separates the recommendation into seven visible pass, review, or block gates and uses the cached entity index for faster Trust Desk resolution.
-- **Cached entity index:** saves resolved facility IDs, canonical names, duplicate-review flags, source-row fingerprints, and grep-ready search text as a Delta table so the normal query path does not re-resolve every candidate.
-- **Lakebase shortlist:** saves the mission packet, gate trace, facility anchor, confidence, decision, and review note.
-- **MLflow evaluation:** validates evidence grounding and operator actionability with registered checks.
+- **Find a practical starting point:** rank districts and candidate referral anchors for the selected care need.
+- **Balance need with supply:** combine NFHS district health indicators with facility-density context instead of looking only at hospital counts.
+- **Check whether an anchor is believable:** compare facility claims, website evidence, duplicate risk, and trust signals before acting.
+- **See the evidence behind the recommendation:** inspect facility text, source URLs, and Unity Catalog provenance rows for important claims.
+- **Know when to slow down:** use Mission Control v5.4 to turn weak evidence into a visible shortlist, verify-first, or hold action.
+- **Reuse resolved facility identities:** rely on a cached entity index with source-row fingerprints, while falling back to runtime resolution when data changes.
+- **Keep the decision durable:** save the mission packet, gate trace, facility anchor, confidence, decision, and review note to Lakebase.
+- **Validate the workflow:** use MLflow evaluation checks for evidence grounding and operator actionability.
 
 ## Optimized Pipeline View
 
