@@ -1,13 +1,21 @@
 # Care Convoy
 
-**Track 3: Referral Copilot for the Virtue Foundation Data for Good Hackathon**
+Care Convoy is a decision-support app for global-health referral planning in India. It helps an operations team compare district health need, local facility supply, facility trust signals, and source evidence before deciding where a specialty medical team should go next.
 
-Care Convoy helps a Virtue Foundation operations lead decide where to send the next specialty medical team in India. It turns the provided facility graph, NFHS district health signals, pincode geography, cited facility evidence, uncertainty labels, Mission Control gates, and Lakebase persistence into one saveable referral mission packet.
+Instead of presenting a single opaque score, Care Convoy produces a saveable referral mission packet with cited evidence, uncertainty labels, duplicate and website trust checks, and a clear next action: shortlist, verify first, or hold.
+
+The app is built for non-technical users who need a practical answer: which district should be prioritized, which facility can anchor referrals, what evidence supports that choice, and what still needs verification.
+
+**Hackathon note:** Care Convoy was built for the Databricks Data for Good Hackathon using the provided Virtue Foundation facility dataset, NFHS district indicators, and India pincode directory.
 
 - **Author:** Pingying Chen
 - **Co-author:** Zihang Liang
 
 ## Judge Fast Read
+
+From here, the README is judge-facing: it maps the project to the hackathon track, demo path, evidence model, validation proof, and Databricks resources.
+
+**Track 3: Referral Copilot for the Virtue Foundation Data for Good Hackathon**
 
 | Judging criterion | What Care Convoy proves | Where to look in the demo |
 |---|---|---|
