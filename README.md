@@ -12,15 +12,6 @@ The current app keeps the operator-first referral workflow and improves usabilit
 
 **Hackathon note:** Care Convoy was built for the Databricks Data for Good Hackathon using the provided Virtue Foundation facility dataset, NFHS district indicators, and India pincode directory.
 
-**Track 3: Referral Copilot for the Virtue Foundation Data for Good Hackathon**
-
-| Judging criterion | What Care Convoy proves | Where to look in the demo |
-|---|---|---|
-| Product judgment | A non-technical operations lead can choose a district, referral anchor, and verification action in minutes. | Plan, Why This Place, Save Review Note |
-| Evidence and uncertainty | Rankings, facility fit, NFHS context, trust labels, and recommendations show citations or warnings instead of hiding weak evidence. | Evidence Details, Compare Anchors, Why This Place |
-| Technical execution | Runs as a Databricks App using Unity Catalog, SQL Warehouse, joined readiness tables, append-only scoring and entity-mapping tables, backend evidence caches, Lakebase, Model Serving hooks, MLflow evaluation, Streamlit, pandas, Plotly, and PyDeck. | Product Introduction, Backend Pipeline, Databricks Resources |
-| Ambition | The app does not stop at a map or a list. It uses seven decision gates to decide whether to shortlist, verify first, or hold. | Decision gates |
-
 ## Demo Media
 
 <img src="docs/assets/care-convoy-demo.jpg" alt="Care Convoy demo showing the Maharashtra referral map and mission packet" width="100%">
