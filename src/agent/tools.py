@@ -18,7 +18,12 @@ from src.db.warehouse import run_sql
 
 CATALOG = os.environ.get("HACKATHON_CATALOG", "databricks_virtue_foundation_dataset_dais_2026")
 SCHEMA = os.environ.get("HACKATHON_SCHEMA", "virtue_foundation_dataset")
-FACILITY_CANDIDATE_WINDOW = 160
+DEFAULT_FACILITY_REVIEW_WINDOW = 500
+DEFAULT_JOINED_FACILITY_TABLE = "workspace.default.care_convoy_joined_facility_readiness"
+DEFAULT_JOINED_DISTRICT_TABLE = "workspace.default.care_convoy_joined_district_readiness"
+DEFAULT_SEARCH_RESULT_TABLE = "workspace.default.care_convoy_facility_search_results"
+DEFAULT_WEBSITE_SIGNAL_TABLE = "workspace.default.care_convoy_website_signals"
+DEFAULT_TRUST_REVIEW_TABLE = "workspace.default.care_convoy_facility_trust_reviews"
 ENTITY_INDEX_VERSION = "care-convoy-entity-index-v1"
 SCORING_VERSION = "care-convoy-scoring-v1"
 ENTITY_RESOLUTION_PAIRWISE_LIMIT = 350
@@ -225,24 +230,94 @@ def _tag_source(df: pd.DataFrame, source: str) -> pd.DataFrame:
     return tagged
 
 
-def entity_index_table_name(value: str | None = None) -> str:
-    raw_table = (value if value is not None else os.environ.get("ENTITY_INDEX_TABLE", "")).strip()
+def _optional_positive_int_env(name: str, default: int = 0) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)) or default)
+    except ValueError:
+        return default
+    return max(value, 0)
+
+
+def _safe_three_part_table_name(raw_table: str) -> str:
+    raw_table = raw_table.strip()
     if not raw_table:
         return ""
     parts = raw_table.split(".")
     if len(parts) != 3 or not all(_SQL_IDENTIFIER_PATTERN.fullmatch(part) for part in parts):
         return ""
     return ".".join(parts)
+
+
+def entity_index_table_name(value: str | None = None) -> str:
+    raw_table = (value if value is not None else os.environ.get("ENTITY_INDEX_TABLE", "")).strip()
+    return _safe_three_part_table_name(raw_table)
 
 
 def scoring_table_name(value: str | None = None) -> str:
     raw_table = (value if value is not None else os.environ.get("SCORING_TABLE", "")).strip()
-    if not raw_table:
+    return _safe_three_part_table_name(raw_table)
+
+
+def joined_facility_table_name(value: str | None = None) -> str:
+    if value is not None:
+        raw_table = value.strip()
+    else:
+        raw_table = os.environ.get("JOINED_FACILITY_TABLE", DEFAULT_JOINED_FACILITY_TABLE).strip()
+    if raw_table.lower() in {"", "none", "disabled"}:
         return ""
-    parts = raw_table.split(".")
-    if len(parts) != 3 or not all(_SQL_IDENTIFIER_PATTERN.fullmatch(part) for part in parts):
+    return _safe_three_part_table_name(raw_table)
+
+
+def joined_district_table_name(value: str | None = None) -> str:
+    if value is not None:
+        raw_table = value.strip()
+    else:
+        raw_table = os.environ.get("JOINED_DISTRICT_TABLE", DEFAULT_JOINED_DISTRICT_TABLE).strip()
+    if raw_table.lower() in {"", "none", "disabled"}:
         return ""
-    return ".".join(parts)
+    return _safe_three_part_table_name(raw_table)
+
+
+def search_result_table_name(value: str | None = None) -> str:
+    if value is not None:
+        raw_table = value.strip()
+    else:
+        raw_table = os.environ.get("SEARCH_RESULT_TABLE", DEFAULT_SEARCH_RESULT_TABLE).strip()
+    if raw_table.lower() in {"", "none", "disabled"}:
+        return ""
+    return _safe_three_part_table_name(raw_table)
+
+
+def website_signal_table_name(value: str | None = None) -> str:
+    if value is not None:
+        raw_table = value.strip()
+    else:
+        raw_table = os.environ.get("WEBSITE_SIGNAL_TABLE", DEFAULT_WEBSITE_SIGNAL_TABLE).strip()
+    if raw_table.lower() in {"", "none", "disabled"}:
+        return ""
+    return _safe_three_part_table_name(raw_table)
+
+
+def trust_review_table_name(value: str | None = None) -> str:
+    if value is not None:
+        raw_table = value.strip()
+    else:
+        raw_table = os.environ.get("TRUST_REVIEW_TABLE", DEFAULT_TRUST_REVIEW_TABLE).strip()
+    if raw_table.lower() in {"", "none", "disabled"}:
+        return ""
+    return _safe_three_part_table_name(raw_table)
+
+
+def _raw_facility_table_name() -> str:
+    return f"{CATALOG}.{SCHEMA}.facilities"
+
+
+def _facility_source_tables() -> list[tuple[str, str]]:
+    raw_table = _raw_facility_table_name()
+    joined_table = joined_facility_table_name()
+    if joined_table and joined_table != raw_table:
+        return [("joined", joined_table), ("raw", raw_table)]
+    return [("raw", raw_table)]
 
 
 def _empty_search_results() -> pd.DataFrame:
@@ -584,46 +659,7 @@ def _empty_density_frame() -> pd.DataFrame:
     )
 
 
-def _district_density_context(
-    mission_type: str,
-    state_filter: str,
-    district_filter: str,
-) -> pd.DataFrame:
-    keyword_filter = _keyword_sql(mission_type, "f.")
-    parameters: dict[str, object] = {}
-    state_clause = "1 = 1"
-    if state_filter:
-        state_clause = _state_filter_clause(["pin.statename", "f.address_stateOrRegion"], state_filter, parameters)
-
-    district_clause = "1 = 1"
-    if district_filter:
-        district_clause = (
-            "coalesce(lower(pin.district), '') like lower(:district_filter) or "
-            "coalesce(lower(f.address_city), '') like lower(:district_filter) or "
-            "coalesce(lower(f.address_zipOrPostcode), '') like lower(:district_filter)"
-        )
-        parameters["district_filter"] = f"%{district_filter}%"
-
-    sql = f"""
-    select
-      coalesce(nullif(pin.district, ''), f.address_city) as district,
-      coalesce(nullif(pin.statename, ''), f.address_stateOrRegion) as state,
-      count(distinct f.unique_id) as facility_count,
-      count(distinct case when ({keyword_filter}) then f.unique_id end) as mission_facility_count,
-      avg(cast(f.latitude as double)) as latitude,
-      avg(cast(f.longitude as double)) as longitude
-    from {CATALOG}.{SCHEMA}.facilities f
-    left join {CATALOG}.{SCHEMA}.india_post_pincode_directory pin
-      on regexp_replace(coalesce(f.address_zipOrPostcode, ''), '[^0-9]', '') = cast(pin.pincode as string)
-    where coalesce(lower(f.address_country), '') like '%india%'
-      and ({state_clause})
-      and ({district_clause})
-    group by
-      coalesce(nullif(pin.district, ''), f.address_city),
-      coalesce(nullif(pin.statename, ''), f.address_stateOrRegion)
-    limit 500
-    """
-    raw = run_sql(sql, parameters=parameters)
+def _normalize_density_frame(raw: pd.DataFrame) -> pd.DataFrame:
     if raw.empty:
         return _empty_density_frame()
 
@@ -651,6 +687,103 @@ def _district_density_context(
             "state_key",
         ]
     ]
+
+
+def _joined_density_context(
+    source_table: str,
+    mission_type: str,
+    state_filter: str,
+    district_filter: str,
+) -> pd.DataFrame:
+    keyword_filter = _keyword_sql(mission_type, "f.")
+    parameters: dict[str, object] = {}
+    state_clause = "1 = 1"
+    if state_filter:
+        state_clause = _state_filter_clause(["f.joined_state", "f.address_stateOrRegion"], state_filter, parameters)
+
+    district_clause = "1 = 1"
+    if district_filter:
+        district_clause = (
+            "coalesce(lower(f.joined_district), '') like lower(:district_filter) or "
+            "coalesce(lower(f.address_city), '') like lower(:district_filter) or "
+            "coalesce(lower(f.address_zipOrPostcode), '') like lower(:district_filter)"
+        )
+        parameters["district_filter"] = f"%{district_filter}%"
+
+    sql = f"""
+    select
+      coalesce(nullif(f.joined_district, ''), f.address_city) as district,
+      coalesce(nullif(f.joined_state, ''), f.address_stateOrRegion) as state,
+      count(distinct f.unique_id) as facility_count,
+      count(distinct case when ({keyword_filter}) then f.unique_id end) as mission_facility_count,
+      avg(coalesce(cast(f.latitude as double), cast(f.pincode_latitude as double))) as latitude,
+      avg(coalesce(cast(f.longitude as double), cast(f.pincode_longitude as double))) as longitude
+    from {source_table} f
+    where coalesce(lower(f.address_country), '') like '%india%'
+      and ({state_clause})
+      and ({district_clause})
+    group by
+      coalesce(nullif(f.joined_district, ''), f.address_city),
+      coalesce(nullif(f.joined_state, ''), f.address_stateOrRegion)
+    """
+    return _normalize_density_frame(run_sql(sql, parameters=parameters))
+
+
+def _raw_density_context(
+    mission_type: str,
+    state_filter: str,
+    district_filter: str,
+) -> pd.DataFrame:
+    keyword_filter = _keyword_sql(mission_type, "f.")
+    parameters: dict[str, object] = {}
+    state_clause = "1 = 1"
+    if state_filter:
+        state_clause = _state_filter_clause(["pin.statename", "f.address_stateOrRegion"], state_filter, parameters)
+
+    district_clause = "1 = 1"
+    if district_filter:
+        district_clause = (
+            "coalesce(lower(pin.district), '') like lower(:district_filter) or "
+            "coalesce(lower(f.address_city), '') like lower(:district_filter) or "
+            "coalesce(lower(f.address_zipOrPostcode), '') like lower(:district_filter)"
+        )
+        parameters["district_filter"] = f"%{district_filter}%"
+
+    sql = f"""
+    select
+      coalesce(nullif(pin.district, ''), f.address_city) as district,
+      coalesce(nullif(pin.statename, ''), f.address_stateOrRegion) as state,
+      count(distinct f.unique_id) as facility_count,
+      count(distinct case when ({keyword_filter}) then f.unique_id end) as mission_facility_count,
+      avg(cast(f.latitude as double)) as latitude,
+      avg(cast(f.longitude as double)) as longitude
+    from {_raw_facility_table_name()} f
+    left join {CATALOG}.{SCHEMA}.india_post_pincode_directory pin
+      on regexp_replace(coalesce(f.address_zipOrPostcode, ''), '[^0-9]', '') = cast(pin.pincode as string)
+    where coalesce(lower(f.address_country), '') like '%india%'
+      and ({state_clause})
+      and ({district_clause})
+    group by
+      coalesce(nullif(pin.district, ''), f.address_city),
+      coalesce(nullif(pin.statename, ''), f.address_stateOrRegion)
+    """
+    return _normalize_density_frame(run_sql(sql, parameters=parameters))
+
+
+def _district_density_context(
+    mission_type: str,
+    state_filter: str,
+    district_filter: str,
+) -> pd.DataFrame:
+    for source_label, source_table in _facility_source_tables():
+        density = (
+            _joined_density_context(source_table, mission_type, state_filter, district_filter)
+            if source_label == "joined"
+            else _raw_density_context(mission_type, state_filter, district_filter)
+        )
+        if not density.empty:
+            return density
+    return _empty_density_frame()
 
 
 def _density_confidence_label(row: pd.Series) -> str:
@@ -704,12 +837,50 @@ def _district_risk_flags(row: pd.Series) -> str:
     return "; ".join(flags)
 
 
-def get_district_priorities(
+def _joined_district_priority_rows(
     mission_type: str,
     state_filter: str,
     district_filter: str,
-    confidence_threshold: float,
 ) -> pd.DataFrame:
+    district_table = joined_district_table_name()
+    if not district_table:
+        return pd.DataFrame()
+
+    mission_count_columns = {
+        "maternal_health": "maternal_health_facility_count",
+        "surgery": "surgery_facility_count",
+        "emergency_care": "emergency_care_facility_count",
+        "general_access": "general_access_facility_count",
+    }
+    mission_count_column = mission_count_columns.get(mission_type, "general_access_facility_count")
+    parameters: dict[str, object] = {}
+    filters = ["1 = 1"]
+    if state_filter:
+        filters.append(f"({_state_filter_clause(['state'], state_filter, parameters)})")
+    if district_filter:
+        filters.append("coalesce(lower(district), '') like lower(:district_filter)")
+        parameters["district_filter"] = f"%{district_filter}%"
+
+    sql = f"""
+    select
+      district,
+      state,
+      child_underweight_pct,
+      insurance_pct,
+      institutional_birth_pct,
+      high_bp_pct,
+      facility_count,
+      {mission_count_column} as mission_facility_count,
+      latitude,
+      longitude,
+      density_matched
+    from {district_table}
+    where {' and '.join(filters)}
+    """
+    return run_sql(sql, parameters=parameters)
+
+
+def _raw_district_priority_rows(state_filter: str) -> pd.DataFrame:
     state_clause = ""
     parameters: dict[str, object] = {}
     if state_filter:
@@ -725,24 +896,53 @@ def get_district_priorities(
       coalesce(try_cast(trim(cast(w15_plus_with_high_bp_sys_gte_140_mmhg_and_or_dia_gte_90_mm_pct as string)) as double), 0.0) as high_bp_pct
     from {CATALOG}.{SCHEMA}.nfhs_5_district_health_indicators
     {state_clause}
-    limit 50
     """
-    raw = run_sql(sql, parameters=parameters)
-    if raw.empty:
-        return _fallback_districts(state_filter)
+    return run_sql(sql, parameters=parameters)
 
-    df = raw.rename(columns=str)
+
+def _normalize_district_priority_rows(raw: pd.DataFrame, district_filter: str) -> pd.DataFrame:
+    df = raw.rename(columns=str).copy()
+    for column in ["district", "state"]:
+        if column not in df:
+            df[column] = ""
+        df[column] = df[column].apply(_safe_text)
     df["state"] = df["state"].apply(_canonical_state_name)
-    for column in ["child_underweight_pct", "insurance_pct", "institutional_birth_pct", "high_bp_pct"]:
+    for column in [
+        "child_underweight_pct",
+        "insurance_pct",
+        "institutional_birth_pct",
+        "high_bp_pct",
+        "facility_count",
+        "mission_facility_count",
+        "latitude",
+        "longitude",
+    ]:
         if column not in df:
             df[column] = 0
         df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0)
+    if "density_matched" in df:
+        df["density_matched"] = df["density_matched"].apply(_truthy_value)
     if district_filter:
         df = df[df["district"].str.contains(district_filter, case=False, na=False, regex=False)]
-    if df.empty:
+    return df
+
+
+def get_district_priorities(
+    mission_type: str,
+    state_filter: str,
+    district_filter: str,
+    confidence_threshold: float,
+) -> pd.DataFrame:
+    raw = _joined_district_priority_rows(mission_type, state_filter, district_filter)
+    using_joined_districts = not raw.empty
+    if raw.empty:
+        raw = _raw_district_priority_rows(state_filter)
+    if raw.empty:
         return _fallback_districts(state_filter)
 
-    density = _district_density_context(mission_type, state_filter, district_filter)
+    df = _normalize_district_priority_rows(raw, district_filter)
+    if df.empty:
+        return _fallback_districts(state_filter)
 
     df["district_key"] = df["district"].apply(_location_key)
     df["state_key"] = df["state"].apply(_state_key)
@@ -757,18 +957,26 @@ def get_district_priorities(
     elif mission_type == "general_access":
         df["need_score"] = df["need_score"] + (100 - df["insurance_pct"].fillna(0)) * 0.2
 
-    if not density.empty:
-        df = df.merge(
-            density.drop(columns=["district", "state"]),
-            on=["district_key", "state_key"],
-            how="left",
-        )
-    else:
-        df["facility_count"] = 0
-        df["mission_facility_count"] = 0
-        df["latitude"] = 0
-        df["longitude"] = 0
-        df["density_matched"] = False
+    if not using_joined_districts:
+        density = _district_density_context(mission_type, state_filter, district_filter)
+        if not density.empty:
+            df = df.merge(
+                density.drop(columns=["district", "state"]),
+                on=["district_key", "state_key"],
+                how="left",
+                suffixes=("", "_density"),
+            )
+            for column in ["facility_count", "mission_facility_count", "latitude", "longitude"]:
+                density_column = f"{column}_density"
+                if density_column in df:
+                    df[column] = pd.to_numeric(df[density_column], errors="coerce").fillna(df[column])
+                    df = df.drop(columns=[density_column])
+        else:
+            df["density_matched"] = False
+
+    for column in ["facility_count", "mission_facility_count", "latitude", "longitude"]:
+        if column not in df:
+            df[column] = 0
 
     if "density_matched" not in df:
         df["density_matched"] = df["facility_count"].notna()
@@ -798,12 +1006,17 @@ def get_district_priorities(
     df = scored[scored["evidence_score"] >= threshold_score]
     if df.empty:
         df = scored
-    return _tag_source(
+    ranked = (
         df.sort_values(["priority_score", "need_score"], ascending=False)
         .drop(columns=["district_key", "state_key"], errors="ignore")
-        .head(10),
-        "live",
     )
+    top_ranked = ranked.head(10)
+    tagged = _tag_source(top_ranked, "live")
+    tagged.attrs["district_source_table"] = joined_district_table_name() if using_joined_districts else _unity_catalog_uri("nfhs_5_district_health_indicators")
+    tagged.attrs["source_row_count"] = int(len(scored))
+    tagged.attrs["threshold_row_count"] = int(len(df))
+    tagged.attrs["displayed_row_count"] = int(len(top_ranked))
+    return tagged
 
 
 def _candidate_seed_score_from_row(row: pd.Series) -> float:
@@ -1366,15 +1579,26 @@ def _search_result_match_score(entity: pd.Series, result: pd.Series) -> float:
     return min(name_similarity + city_bonus + domain_bonus, 1.0)
 
 
-def search_facility_sources(df: pd.DataFrame, limit: int = 3, allow_search: bool = True) -> pd.DataFrame:
-    if df.empty:
-        return _empty_search_results()
-
+def _canonical_facility_frame(df: pd.DataFrame, max_facilities: int = 4) -> pd.DataFrame:
     canonical = (
         df.sort_values(["urgency_support", "dataset_trust_score"], ascending=False)
         .drop_duplicates("resolved_entity_id")
-        .head(4)
     )
+    if max_facilities > 0:
+        return canonical.head(max_facilities)
+    return canonical
+
+
+def search_facility_sources(
+    df: pd.DataFrame,
+    limit: int = 3,
+    allow_search: bool = True,
+    max_facilities: int = 4,
+) -> pd.DataFrame:
+    if df.empty:
+        return _empty_search_results()
+
+    canonical = _canonical_facility_frame(df, max_facilities=max_facilities)
     rows: list[dict[str, Any]] = []
     for row in canonical.itertuples(index=False):
         dataset_urls = list(getattr(row, "source_url_list", []))
@@ -1489,15 +1713,12 @@ def collect_website_signals(
     df: pd.DataFrame,
     search_results: pd.DataFrame,
     allow_web_enrichment: bool = True,
+    max_facilities: int = 4,
 ) -> pd.DataFrame:
     if df.empty:
         return _empty_website_signals()
 
-    canonical = (
-        df.sort_values(["urgency_support", "dataset_trust_score"], ascending=False)
-        .drop_duplicates("resolved_entity_id")
-        .head(4)
-    )
+    canonical = _canonical_facility_frame(df, max_facilities=max_facilities)
     rows: list[dict[str, Any]] = []
     for row in canonical.itertuples(index=False):
         selected = search_results[
@@ -1728,6 +1949,112 @@ def build_trust_reviews(
     return pd.DataFrame(rows, columns=TRUST_REVIEW_COLUMNS)
 
 
+def _facility_id_parameters(df: pd.DataFrame) -> tuple[str, dict[str, object]]:
+    if df.empty or "unique_id" not in df:
+        return "", {}
+    facility_ids = list(dict.fromkeys(_safe_text(value) for value in df["unique_id"].tolist() if _safe_text(value)))
+    if not facility_ids:
+        return "", {}
+    parameters = {f"facility_id_{index}": value for index, value in enumerate(facility_ids)}
+    placeholders = ", ".join(f":{name}" for name in parameters)
+    return placeholders, parameters
+
+
+def _coerce_cached_frame(
+    frame: pd.DataFrame,
+    columns: list[str],
+    *,
+    bool_columns: set[str] | None = None,
+    numeric_columns: set[str] | None = None,
+) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+    cached = frame.rename(columns=str).copy()
+    for column in columns:
+        if column not in cached:
+            cached[column] = None
+    for column in bool_columns or set():
+        if column in cached:
+            cached[column] = cached[column].apply(_truthy_value)
+    for column in numeric_columns or set():
+        if column in cached:
+            cached[column] = pd.to_numeric(cached[column], errors="coerce").fillna(0)
+    text_columns = set(columns) - (bool_columns or set()) - (numeric_columns or set())
+    for column in text_columns:
+        if column in cached:
+            cached[column] = cached[column].apply(_safe_text)
+    return cached[columns]
+
+
+def _load_cached_table_rows(
+    table_name: str,
+    columns: list[str],
+    facilities: pd.DataFrame,
+    *,
+    bool_columns: set[str] | None = None,
+    numeric_columns: set[str] | None = None,
+) -> pd.DataFrame:
+    if not table_name:
+        return pd.DataFrame(columns=columns)
+    placeholders, parameters = _facility_id_parameters(facilities)
+    if not placeholders:
+        return pd.DataFrame(columns=columns)
+    sql = f"""
+    select {", ".join(columns)}
+    from {table_name}
+    where facility_id in ({placeholders})
+    """
+    cached = run_sql(sql, parameters=parameters)
+    return _coerce_cached_frame(
+        cached,
+        columns,
+        bool_columns=bool_columns,
+        numeric_columns=numeric_columns,
+    )
+
+
+def load_cached_search_results(facilities: pd.DataFrame) -> pd.DataFrame:
+    return _load_cached_table_rows(
+        search_result_table_name(),
+        SEARCH_RESULT_COLUMNS,
+        facilities,
+        bool_columns={"selected"},
+        numeric_columns={"result_rank", "match_confidence"},
+    )
+
+
+def load_cached_website_signals(facilities: pd.DataFrame) -> pd.DataFrame:
+    return _load_cached_table_rows(
+        website_signal_table_name(),
+        WEBSITE_SIGNAL_COLUMNS,
+        facilities,
+        bool_columns={"domain_matches_dataset"},
+        numeric_columns={"social_link_count", "contact_signal_count", "capability_mentions", "name_match_score"},
+    )
+
+
+def load_cached_trust_reviews(facilities: pd.DataFrame) -> pd.DataFrame:
+    return _load_cached_table_rows(
+        trust_review_table_name(),
+        TRUST_REVIEW_COLUMNS,
+        facilities,
+        bool_columns={"duplicate_review_required"},
+        numeric_columns={
+            "entity_record_count",
+            "entity_match_confidence",
+            "social_link_count",
+            "contact_signal_count",
+            "capability_mentions",
+            "name_match_score",
+            "dataset_social_score",
+            "website_signal_score",
+            "resolution_signal_score",
+            "freshness_signal_score",
+            "trust_score_v2",
+        },
+    )
+
+
 def _attach_artifacts(
     df: pd.DataFrame,
     source: str,
@@ -1736,6 +2063,8 @@ def _attach_artifacts(
     website_signals: pd.DataFrame,
     entity_index_source: str,
     scoring_source: str,
+    evidence_source: str,
+    row_counts: dict[str, int] | None = None,
 ) -> pd.DataFrame:
     tagged = _tag_source(df, source)
     tagged.attrs["trust_reviews"] = trust_reviews
@@ -1743,6 +2072,9 @@ def _attach_artifacts(
     tagged.attrs["website_signals"] = website_signals
     tagged.attrs["entity_index_source"] = entity_index_source
     tagged.attrs["scoring_source"] = scoring_source
+    tagged.attrs["evidence_source"] = evidence_source
+    for key, value in (row_counts or {}).items():
+        tagged.attrs[key] = int(value)
     return tagged
 
 
@@ -1752,12 +2084,25 @@ def _build_facility_review_frame(
     confidence_threshold: float,
     allow_web_enrichment: bool,
 ) -> pd.DataFrame:
+    sql_source_row_count = len(base)
+    if "source_row_count" in base:
+        source_counts = pd.to_numeric(base["source_row_count"], errors="coerce").dropna()
+        if not source_counts.empty:
+            sql_source_row_count = int(source_counts.max())
+
     cleaned = _clean_facility_candidates(base)
     scoring_source = _scoring_cache_source(cleaned)
     resolved, entity_index_source = _resolve_entity_frame(cleaned)
-    search_results = search_facility_sources(resolved, allow_search=allow_web_enrichment)
-    website_signals = collect_website_signals(resolved, search_results, allow_web_enrichment=allow_web_enrichment)
-    trust_reviews = build_trust_reviews(resolved, search_results, website_signals, source=source)
+    search_results = load_cached_search_results(resolved)
+    website_signals = load_cached_website_signals(resolved)
+    trust_reviews = load_cached_trust_reviews(resolved)
+    evidence_source = "cached" if not (search_results.empty and website_signals.empty and trust_reviews.empty) else "runtime"
+    if evidence_source == "runtime":
+        search_results = search_facility_sources(resolved, allow_search=allow_web_enrichment)
+        website_signals = collect_website_signals(resolved, search_results, allow_web_enrichment=allow_web_enrichment)
+        trust_reviews = build_trust_reviews(resolved, search_results, website_signals, source=source)
+    elif trust_reviews.empty:
+        trust_reviews = build_trust_reviews(resolved, search_results, website_signals, source=source)
 
     final = resolved.merge(
         trust_reviews[
@@ -1800,11 +2145,11 @@ def _build_facility_review_frame(
     if filtered.empty:
         filtered = final.copy()
 
-    filtered = (
+    ranked = (
         filtered.sort_values(["urgency_support", "trust_score", "capability_fit"], ascending=False)
         .drop_duplicates("resolved_entity_id")
-        .head(12)
     )
+    filtered = ranked.head(12)
     entity_ids = filtered["resolved_entity_id"].dropna().unique().tolist()
     filtered_reviews = trust_reviews[trust_reviews["resolved_entity_id"].isin(entity_ids)].copy()
     filtered_search = search_results[search_results["resolved_entity_id"].isin(entity_ids)].copy()
@@ -1817,6 +2162,13 @@ def _build_facility_review_frame(
         filtered_signals,
         entity_index_source,
         scoring_source,
+        evidence_source,
+        {
+            "source_row_count": sql_source_row_count,
+            "resolved_entity_count": final["resolved_entity_id"].nunique(),
+            "threshold_row_count": len(ranked),
+            "displayed_row_count": len(filtered),
+        },
     )
 
 
@@ -1868,9 +2220,11 @@ def _facility_candidate_sql(
     mission_type: str,
     state_clause: str,
     district_clause: str,
+    source_table: str | None = None,
     *,
     use_entity_index: bool,
     use_scoring_cache: bool,
+    require_keyword_match: bool = True,
 ) -> str:
     entity_table = entity_index_table_name()
     if use_entity_index and not entity_table:
@@ -1880,7 +2234,7 @@ def _facility_candidate_sql(
     if use_scoring_cache and not score_table:
         use_scoring_cache = False
 
-    table_alias = "f." if use_entity_index or use_scoring_cache else ""
+    table_alias = "f."
     keyword_filter = _keyword_sql(mission_type, table_alias)
     candidate_seed_score = _candidate_seed_score_sql(table_alias)
     select_list = _facility_select_list(table_alias)
@@ -1932,28 +2286,53 @@ def _facility_candidate_sql(
     """
         )
 
+    facility_table = source_table or _raw_facility_table_name()
     if use_entity_index or use_scoring_cache:
         from_clause = f"""
-    from {CATALOG}.{SCHEMA}.facilities f
+    from {facility_table} f
     {''.join(joins)}
         """
         candidate_seed_select = f"coalesce(sc.candidate_seed_score, {candidate_seed_score})" if use_scoring_cache else candidate_seed_score
     else:
-        from_clause = f"from {CATALOG}.{SCHEMA}.facilities"
+        from_clause = f"from {facility_table} f"
         candidate_seed_select = candidate_seed_score
+    candidate_window = _optional_positive_int_env("FACILITY_REVIEW_WINDOW", DEFAULT_FACILITY_REVIEW_WINDOW)
+    limit_clause = f"limit {candidate_window}" if candidate_window else ""
+    keyword_clause = f"and ({keyword_filter})" if require_keyword_match else ""
 
     return f"""
     select
       {select_list},
-      {candidate_seed_select} as candidate_seed_score
+      {candidate_seed_select} as candidate_seed_score,
+      count(*) over() as source_row_count
     {from_clause}
     where ({state_clause})
       and ({district_clause})
       and coalesce(lower({table_alias}address_country), '') like '%india%'
-      and ({keyword_filter})
+      {keyword_clause}
     order by candidate_seed_score desc, coalesce({table_alias}name, '') asc, coalesce({table_alias}unique_id, '') asc
-    limit {FACILITY_CANDIDATE_WINDOW}
+    {limit_clause}
     """
+
+
+def _facility_query_attempts(
+    joined_state_clause: str,
+    joined_district_clause: str,
+    raw_state_clause: str,
+    raw_district_clause: str,
+) -> list[tuple[str, str, bool, bool, str, str, bool]]:
+    score_cache_enabled = bool(scoring_table_name())
+    attempts: list[tuple[str, str, bool, bool, str, str, bool]] = []
+    for require_keyword_match in [True, False]:
+        for source_label, source_table in _facility_source_tables():
+            state_clause = joined_state_clause if source_label == "joined" else raw_state_clause
+            district_clause = joined_district_clause if source_label == "joined" else raw_district_clause
+            attempts.append((source_label, source_table, True, score_cache_enabled, state_clause, district_clause, require_keyword_match))
+            if score_cache_enabled:
+                attempts.append((source_label, source_table, True, False, state_clause, district_clause, require_keyword_match))
+                attempts.append((source_label, source_table, False, True, state_clause, district_clause, require_keyword_match))
+            attempts.append((source_label, source_table, False, False, state_clause, district_clause, require_keyword_match))
+    return attempts
 
 
 def get_facility_candidates(
@@ -1963,43 +2342,55 @@ def get_facility_candidates(
     confidence_threshold: float,
 ) -> pd.DataFrame:
     parameters: dict[str, object] = {}
-    state_clause = "1 = 1"
+    joined_state_clause = "1 = 1"
+    raw_state_clause = "1 = 1"
     if state_filter:
-        state_clause = _state_filter_clause(["address_stateOrRegion"], state_filter, parameters)
+        joined_state_clause = _state_filter_clause(["f.joined_state", "f.address_stateOrRegion"], state_filter, parameters)
+        raw_state_clause = _state_filter_clause(["f.address_stateOrRegion"], state_filter, parameters)
 
-    district_clause = "1 = 1"
+    joined_district_clause = "1 = 1"
+    raw_district_clause = "1 = 1"
     if district_filter:
-        district_clause = (
-            "coalesce(lower(address_city), '') like lower(:district_filter) or "
-            "coalesce(lower(address_zipOrPostcode), '') like lower(:district_filter)"
+        joined_district_clause = (
+            "coalesce(lower(f.joined_district), '') like lower(:district_filter) or "
+            "coalesce(lower(f.address_city), '') like lower(:district_filter) or "
+            "coalesce(lower(f.address_zipOrPostcode), '') like lower(:district_filter)"
+        )
+        raw_district_clause = (
+            "coalesce(lower(f.address_city), '') like lower(:district_filter) or "
+            "coalesce(lower(f.address_zipOrPostcode), '') like lower(:district_filter)"
         )
         parameters["district_filter"] = f"%{district_filter}%"
 
-    aliased_state_clause = state_clause.replace("address_stateOrRegion", "f.address_stateOrRegion")
-    aliased_district_clause = district_clause.replace("address_city", "f.address_city").replace(
-        "address_zipOrPostcode", "f.address_zipOrPostcode"
-    )
-    score_cache_enabled = bool(scoring_table_name())
-    attempts = [
-        (True, score_cache_enabled, aliased_state_clause, aliased_district_clause),
-    ]
-    if score_cache_enabled:
-        attempts.append((True, False, aliased_state_clause, aliased_district_clause))
-        attempts.append((False, True, aliased_state_clause, aliased_district_clause))
-    attempts.append((False, False, state_clause, district_clause))
     raw = pd.DataFrame()
-    for use_entity_index, use_scoring_cache, attempt_state_clause, attempt_district_clause in attempts:
+    selected_source_table = ""
+    selected_source_label = ""
+    selected_keyword_requirement = True
+    for (
+        source_label,
+        source_table,
+        use_entity_index,
+        use_scoring_cache,
+        attempt_state_clause,
+        attempt_district_clause,
+        require_keyword_match,
+    ) in _facility_query_attempts(joined_state_clause, joined_district_clause, raw_state_clause, raw_district_clause):
         sql = _facility_candidate_sql(
             mission_type,
             attempt_state_clause,
             attempt_district_clause,
+            source_table,
             use_entity_index=use_entity_index,
             use_scoring_cache=use_scoring_cache,
+            require_keyword_match=require_keyword_match,
         )
         if not sql:
             continue
         raw = run_sql(sql, parameters=parameters)
         if not raw.empty:
+            selected_source_table = source_table
+            selected_source_label = source_label
+            selected_keyword_requirement = require_keyword_match
             break
     if raw.empty:
         return _build_facility_review_frame(
@@ -2016,6 +2407,9 @@ def get_facility_candidates(
         allow_web_enrichment=True,
     )
     if not live.empty:
+        live.attrs["facility_source_table"] = selected_source_table
+        live.attrs["facility_source_label"] = selected_source_label
+        live.attrs["keyword_requirement"] = "mission" if selected_keyword_requirement else "location"
         return live
     return _build_facility_review_frame(
         _fallback_facilities(state_filter),

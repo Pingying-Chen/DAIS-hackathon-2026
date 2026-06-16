@@ -54,11 +54,10 @@ def test_district_query_tolerates_string_nfhs_numeric_fields(monkeypatch) -> Non
 
 
 def test_facility_query_uses_parameters_for_user_filters(monkeypatch) -> None:
-    captured: dict[str, object] = {}
+    calls: list[dict[str, object]] = []
 
     def fake_run_sql(statement: str, timeout_seconds: int = 20, parameters: dict[str, object] | None = None) -> pd.DataFrame:
-        captured["statement"] = statement
-        captured["parameters"] = parameters
+        calls.append({"statement": statement, "parameters": parameters})
         return pd.DataFrame()
 
     monkeypatch.setattr(tools, "run_sql", fake_run_sql)
@@ -70,6 +69,7 @@ def test_facility_query_uses_parameters_for_user_filters(monkeypatch) -> None:
         confidence_threshold=0.25,
     )
 
+    captured = calls[0]
     statement = str(captured["statement"])
     assert "Maharashtra' or 1=1 --" not in statement
     assert "Nagpur%' or 'a'='a" not in statement
@@ -82,11 +82,10 @@ def test_facility_query_uses_parameters_for_user_filters(monkeypatch) -> None:
 
 
 def test_facility_query_parenthesizes_state_aliases(monkeypatch) -> None:
-    captured: dict[str, object] = {}
+    calls: list[dict[str, object]] = []
 
     def fake_run_sql(statement: str, timeout_seconds: int = 20, parameters: dict[str, object] | None = None) -> pd.DataFrame:
-        captured["statement"] = statement
-        captured["parameters"] = parameters
+        calls.append({"statement": statement, "parameters": parameters})
         return pd.DataFrame()
 
     monkeypatch.setattr(tools, "run_sql", fake_run_sql)
@@ -98,9 +97,11 @@ def test_facility_query_parenthesizes_state_aliases(monkeypatch) -> None:
         confidence_threshold=0.25,
     )
 
+    captured = calls[0]
     statement = str(captured["statement"])
-    assert "where (coalesce(lower(address_stateOrRegion), '') like lower(:state_filter) or" in statement
-    assert "like lower(:state_filter_alias_1))\n      and (coalesce(lower(address_city), '')" in statement
+    assert "where (coalesce(lower(f.joined_state), '') like lower(:state_filter) or" in statement
+    assert "coalesce(lower(f.address_stateOrRegion), '') like lower(:state_filter)" in statement
+    assert "like lower(:state_filter_alias_1))\n      and (coalesce(lower(f.joined_district), '')" in statement
     assert captured["parameters"] == {
         "state_filter": "%Maharashtra%",
         "state_filter_alias_1": "%Maharastra%",
@@ -108,12 +109,11 @@ def test_facility_query_parenthesizes_state_aliases(monkeypatch) -> None:
     }
 
 
-def test_facility_query_orders_candidate_window_before_limit(monkeypatch) -> None:
-    captured: dict[str, object] = {}
+def test_facility_query_orders_default_review_window_after_ranking(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
 
     def fake_run_sql(statement: str, timeout_seconds: int = 20, parameters: dict[str, object] | None = None) -> pd.DataFrame:
-        captured["statement"] = statement
-        captured["parameters"] = parameters
+        calls.append({"statement": statement, "parameters": parameters})
         return pd.DataFrame()
 
     monkeypatch.setattr(tools, "run_sql", fake_run_sql)
@@ -125,7 +125,30 @@ def test_facility_query_orders_candidate_window_before_limit(monkeypatch) -> Non
         confidence_threshold=0.25,
     )
 
-    statement = str(captured["statement"]).lower()
+    statement = str(calls[0]["statement"]).lower()
     assert "order by" in statement
-    assert statement.index("order by") < statement.index("limit")
+    assert statement.index("order by") < statement.index("limit 500")
+    assert "candidate_seed_score" in statement
+
+
+def test_facility_query_orders_configured_review_window_after_ranking(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+    monkeypatch.setenv("FACILITY_REVIEW_WINDOW", "160")
+
+    def fake_run_sql(statement: str, timeout_seconds: int = 20, parameters: dict[str, object] | None = None) -> pd.DataFrame:
+        calls.append({"statement": statement, "parameters": parameters})
+        return pd.DataFrame()
+
+    monkeypatch.setattr(tools, "run_sql", fake_run_sql)
+
+    tools.get_facility_candidates(
+        mission_type="surgery",
+        state_filter="Maharashtra",
+        district_filter="Nagpur",
+        confidence_threshold=0.25,
+    )
+
+    statement = str(calls[0]["statement"]).lower()
+    assert "order by" in statement
+    assert statement.index("order by") < statement.index("limit 160")
     assert "candidate_seed_score" in statement

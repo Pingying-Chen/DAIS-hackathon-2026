@@ -1117,3 +1117,23 @@ def test_save_user_decision_record_returns_false_on_boundary_error(monkeypatch) 
     )
 
     assert saved is False
+
+
+def test_save_agent_feedback_record_returns_false_on_boundary_error(monkeypatch) -> None:
+    def raise_bootstrap() -> None:
+        raise RuntimeError("must be owner of table")
+
+    monkeypatch.setattr(lakebase, "ensure_tables", raise_bootstrap)
+
+    saved = lakebase.save_agent_feedback_record(
+        run_id="run-1",
+        mission_type="Maternal Health",
+        district="Nagpur",
+        facility_id="facility-1",
+        recommended_action="needs verification",
+        confidence_label="Moderate Confidence",
+        provenance="Live sources",
+        feedback_json="{}",
+    )
+
+    assert saved is False

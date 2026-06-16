@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from math import isnan
 from typing import Any
@@ -16,6 +17,7 @@ from src.agent.tools import (
     get_district_priorities,
     get_facility_candidates,
 )
+from src.db.lakebase import save_agent_feedback_record
 
 MISSION_CONTROL_VERSION = "v5.3"
 DISTRICT_CLAIM_TYPES = {"nfhs_need_summary", "facility_density_context"}
@@ -103,6 +105,14 @@ def _frame_attr(frame: Any, key: str) -> Any:
     if attrs is None:
         return None
     return attrs.get(key)
+
+
+def _frame_count_attr(frame: Any, key: str) -> int:
+    value = _frame_attr(frame, key)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(len(frame)) if frame is not None else 0
 
 
 def _value(row: dict[str, Any] | None, key: str, fallback: Any = "") -> Any:
@@ -546,6 +556,7 @@ def run_agent(
     cache_sources = {
         "scoring": _frame_attr(facilities, "scoring_source") or "runtime",
         "entity_resolution": _frame_attr(facilities, "entity_index_source") or "runtime",
+        "web_evidence": _frame_attr(facilities, "evidence_source") or "runtime",
     }
     top_district = districts.iloc[0].to_dict() if not districts.empty else None
     top_facility = facilities.iloc[0].to_dict() if not facilities.empty else None
@@ -626,6 +637,37 @@ def run_agent(
         confidence_label = str(facilities.iloc[0]["confidence_label"])
 
     provenance = _provenance_label(district_source, facility_source)
+    data_coverage = {
+        "district_source": district_source,
+        "facility_source": facility_source,
+        "district_rows_considered": _frame_count_attr(districts, "source_row_count"),
+        "district_rows_displayed": _frame_count_attr(districts, "displayed_row_count"),
+        "facility_rows_considered": _frame_count_attr(facilities, "source_row_count"),
+        "facility_entities_considered": _frame_count_attr(facilities, "resolved_entity_count"),
+        "facility_rows_displayed": _frame_count_attr(facilities, "displayed_row_count"),
+        "web_evidence_source": _frame_attr(facilities, "evidence_source") or "runtime",
+    }
+    agent_feedback_payload = {
+        "summary_source": summary_source,
+        "board_summary": board_summary,
+        "warnings": warnings,
+        "review_board": review_board,
+        "mission_control_trace": mission_control_trace,
+        "mission_packet": mission_packet,
+        "data_coverage": data_coverage,
+        "cache_sources": cache_sources,
+        "top_trust_review": top_trust_review,
+    }
+    agent_feedback_saved = save_agent_feedback_record(
+        run_id=run_id,
+        mission_type=mission_label,
+        district=str(_value(top_district, "district", "")),
+        facility_id=str(_value(top_facility, "unique_id", "")),
+        recommended_action=str(mission_packet.get("action_state", "review")),
+        confidence_label=confidence_label,
+        provenance=provenance,
+        feedback_json=json.dumps(agent_feedback_payload, default=str),
+    )
     return {
         "run_id": run_id,
         "mission_type": mission_type,
@@ -644,7 +686,9 @@ def run_agent(
         "board_summary": board_summary,
         "warnings": warnings,
         "provenance": provenance,
+        "data_coverage": data_coverage,
         "cache_sources": cache_sources,
+        "agent_feedback_saved": agent_feedback_saved,
         "observability": {
             "mlflow": tracing_status(),
         },
