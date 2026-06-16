@@ -423,8 +423,7 @@ def _render_footer() -> None:
     st.markdown(
         (
             "<div class='db-app-footer'>"
-            "<span>Author: Pingying Chen</span>"
-            "<span>Co-author: Zihang Liang</span>"
+            "<span>Pingying Chen, Zihang Liang</span>"
             "</div>"
         ),
         unsafe_allow_html=True,
@@ -1312,7 +1311,7 @@ def _show_overview(result: dict[str, Any]) -> None:
         selected_map_point = render_map(districts, facilities, height=405)
         _queue_map_jump(selected_map_point)
         st.markdown(
-            "<p class='db-map-caption'>District points show demand context; facility points show anchors being reviewed for credibility.</p>",
+            "<p class='db-map-caption'>Facility points show anchors being reviewed for credibility.</p>",
             unsafe_allow_html=True,
         )
         if top_district is not None:

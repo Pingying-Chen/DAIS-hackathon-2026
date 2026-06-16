@@ -27,7 +27,7 @@ def test_app_initial_render_is_stable() -> None:
     assert "Recommended next move" in rendered_markdown
     assert "Filters" in rendered_markdown
     assert rendered_markdown.index("Recommended next move") < rendered_markdown.index("Filters")
-    assert rendered_markdown.index("Filters") < rendered_markdown.index("District points show")
+    assert rendered_markdown.index("Filters") < rendered_markdown.index("Facility points show")
     assert "Need score:" not in rendered_markdown
     assert "Coverage gap:" not in rendered_markdown
     assert "Evidence support:" not in rendered_markdown
@@ -38,8 +38,9 @@ def test_app_initial_render_is_stable() -> None:
     assert "Sample website evidence" not in rendered_markdown
     assert "For Operations lead" not in rendered_markdown
     assert "Evidence rule" not in rendered_markdown
-    assert "Author: Pingying Chen" in rendered_markdown
-    assert "Co-author: Zihang Liang" in rendered_markdown
+    assert "Pingying Chen, Zihang Liang" in rendered_markdown
+    assert "Author: Pingying Chen" not in rendered_markdown
+    assert "Co-author: Zihang Liang" not in rendered_markdown
     assert any(button.label == "Show why the recommendation is cautious" for button in app.button)
     assert "judge" not in first_page_text.casefold()
     assert "v8" not in first_page_text.casefold()

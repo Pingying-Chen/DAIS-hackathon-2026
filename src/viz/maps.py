@@ -75,11 +75,10 @@ def _selected_object(event: Any) -> dict[str, Any] | None:
     if not isinstance(objects, dict):
         return None
 
-    for layer_id in ("district-points", "facility-points"):
-        layer_objects = objects.get(layer_id)
-        if layer_objects:
-            selected = layer_objects[0]
-            return dict(selected) if isinstance(selected, dict) else None
+    layer_objects = objects.get("facility-points")
+    if layer_objects:
+        selected = layer_objects[0]
+        return dict(selected) if isinstance(selected, dict) else None
     return None
 
 
@@ -106,42 +105,21 @@ def _zoom(points: pd.DataFrame) -> float:
 
 
 def render_map(districts: pd.DataFrame, facilities: pd.DataFrame, height: int = 430) -> dict[str, Any] | None:
-    district_points = pd.DataFrame()
     facility_points = pd.DataFrame()
-    if not districts.empty and {"latitude", "longitude", "district"}.issubset(districts.columns):
-        district_points = _point_frame(districts, label_column="district", type_label="District")
     if not facilities.empty and {"latitude", "longitude", "name"}.issubset(facilities.columns):
         facility_points = _point_frame(facilities, label_column="name", type_label="Facility")
 
-    if district_points.empty and facility_points.empty:
-        st.info("Map coordinates are not available yet for this result set.")
+    if facility_points.empty:
+        st.info("Facility coordinates are not available yet for this result set.")
         return None
 
-    all_points = pd.concat([district_points, facility_points], ignore_index=True)
+    all_points = facility_points.reset_index(drop=True)
     center_lat = float(all_points["lat"].mean())
     center_lon = float(all_points["lon"].mean())
     theme = tokens()
-    district_color = _css_hsl_to_rgb(str(theme["interactive"])) + [120]
     facility_color = _css_hsl_to_rgb(str(theme["accent"])) + [210]
 
     layers: list[pdk.Layer] = []
-    if not district_points.empty:
-        layers.append(
-            pdk.Layer(
-                "ScatterplotLayer",
-                data=district_points,
-                id="district-points",
-                get_position="[lon, lat]",
-                get_radius=24000,
-                radius_min_pixels=7,
-                get_fill_color=district_color,
-                stroked=True,
-                get_line_color=[255, 255, 255, 180],
-                line_width_min_pixels=1,
-                pickable=True,
-                auto_highlight=True,
-            )
-        )
     if not facility_points.empty:
         layers.append(
             pdk.Layer(
@@ -170,7 +148,7 @@ def render_map(districts: pd.DataFrame, facilities: pd.DataFrame, height: int = 
             bearing=0,
         ),
         layers=layers,
-        tooltip={"html": "<b>{label}</b><br/>{kind}<br/>{region}<br/>Click to focus this place", "style": {"fontFamily": "sans-serif"}},
+        tooltip={"html": "<b>{label}</b><br/>{kind}<br/>{region}<br/>Click to focus this facility", "style": {"fontFamily": "sans-serif"}},
     )
     event = st.pydeck_chart(
         deck,

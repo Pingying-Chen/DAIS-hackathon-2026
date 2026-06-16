@@ -30,7 +30,7 @@ The current app keeps the operator-first referral workflow and improves usabilit
 1. Select a care mission such as maternal health, surgery, emergency care, or general access.
 2. Review the dashboard numbers first, then filter by state, district, and minimum certainty when the operator wants a narrower run.
 3. Click **Build Referral Plan**.
-4. Review the priority district, map, referral anchor, backup anchor, confidence, warnings, and cited evidence. A map selection can focus the planner on the selected district or place.
+4. Review the priority district, facility map, referral anchor, backup anchor, confidence, warnings, and cited evidence. A map selection can focus the planner on the selected facility's place.
 5. Open **Why This Place** to see pass, review, or block gates for need, supply density, facility fit, trust, evidence, strategy, and supervisor action.
 6. Open **Evidence Details** to inspect duplicate review, website verification, source URLs, and weak-evidence flags in plain language.
 7. Save a review note so the recommended follow-up becomes durable operational state.
