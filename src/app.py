@@ -39,6 +39,8 @@ CONFIDENCE_OPTIONS = {
 
 ALL_STATES_LABEL = "All India"
 ALL_DISTRICTS_LABEL = "All districts"
+DEFAULT_STATE_FOCUS = "Maharashtra"
+DEFAULT_DISTRICT_FOCUS = "Nagpur"
 
 INDIA_STATE_OPTIONS = [
     "Andaman and Nicobar Islands",
@@ -432,7 +434,7 @@ def _render_footer() -> None:
 def _summary_metrics(result: dict[str, Any] | None) -> None:
     if result is None:
         items = [
-            {"label": "Operator View", "value": "Ready", "value_class": "db-kpi-accent", "note": "Start with the national recommendation."},
+            {"label": "Operator View", "value": "Ready", "value_class": "db-kpi-accent", "note": "Start with the default district recommendation."},
             {"label": "Product Type", "value": "Referral Copilot", "note": "Supports referral planning."},
             {"label": "Evidence", "value": "Required", "note": "Weak claims are downgraded."},
             {"label": "Saved Review Notes", "value": _saved_decisions_status(), "note": "Follow-up notes can be revisited."},
@@ -563,24 +565,24 @@ def _run_plan(
     return result
 
 
-def _ensure_national_result() -> None:
-    if st.session_state.get("national_scan_done"):
+def _ensure_starter_result() -> None:
+    if st.session_state.get("starter_scan_done"):
         return
 
     try:
-        with st.spinner("Loading the India-wide alert..."):
-            st.session_state.national_result = _run_plan(
+        with st.spinner(f"Loading {DEFAULT_DISTRICT_FOCUS}, {DEFAULT_STATE_FOCUS}..."):
+            st.session_state.starter_result = _run_plan(
                 mission_key="maternal_health",
-                state_focus=ALL_STATES_LABEL,
-                district_focus=ALL_DISTRICTS_LABEL,
+                state_focus=DEFAULT_STATE_FOCUS,
+                district_focus=DEFAULT_DISTRICT_FOCUS,
                 confidence_label="Weak Evidence",
             )
             if st.session_state.latest_result is None:
-                st.session_state.latest_result = st.session_state.national_result
+                st.session_state.latest_result = st.session_state.starter_result
     except Exception as exc:
-        st.session_state.national_error = str(exc)
+        st.session_state.starter_error = str(exc)
     finally:
-        st.session_state.national_scan_done = True
+        st.session_state.starter_scan_done = True
 
 
 def _map_jump_target(point: dict[str, Any]) -> tuple[str, str, str] | None:
@@ -662,15 +664,15 @@ def _render_page_jump() -> None:
 
 
 def _render_top_controls() -> tuple[str, str, str, str, bool]:
-    national_result = st.session_state.get("national_result")
+    starter_result = st.session_state.get("starter_result")
     latest_result = st.session_state.get("latest_result")
-    state_options = _state_options(national_result, latest_result)
+    state_options = _state_options(starter_result, latest_result)
     if st.session_state.state_focus not in state_options:
-        st.session_state.state_focus = ALL_STATES_LABEL
+        st.session_state.state_focus = DEFAULT_STATE_FOCUS
 
-    district_options = _district_options(st.session_state.state_focus, national_result, latest_result)
+    district_options = _district_options(st.session_state.state_focus, starter_result, latest_result)
     if st.session_state.district_focus not in district_options:
-        st.session_state.district_focus = ALL_DISTRICTS_LABEL
+        st.session_state.district_focus = DEFAULT_DISTRICT_FOCUS if DEFAULT_DISTRICT_FOCUS in district_options else ALL_DISTRICTS_LABEL
 
     st.markdown(
         (
@@ -689,9 +691,9 @@ def _render_top_controls() -> tuple[str, str, str, str, bool]:
     with cols[1]:
         state_focus = st.selectbox("State", state_options, key="state_focus")
     with cols[2]:
-        district_options = _district_options(state_focus, national_result, latest_result)
+        district_options = _district_options(state_focus, starter_result, latest_result)
         if st.session_state.district_focus not in district_options:
-            st.session_state.district_focus = ALL_DISTRICTS_LABEL
+            st.session_state.district_focus = DEFAULT_DISTRICT_FOCUS if DEFAULT_DISTRICT_FOCUS in district_options else ALL_DISTRICTS_LABEL
         district_focus = st.selectbox("District", district_options, key="district_focus")
     with cols[3]:
         confidence_label = st.selectbox("Minimum certainty", list(CONFIDENCE_OPTIONS), key="confidence_label")
@@ -709,10 +711,10 @@ def _render_top_controls() -> tuple[str, str, str, str, bool]:
 
     if clear_button:
         st.session_state.mission_key = "maternal_health"
-        st.session_state.state_focus = ALL_STATES_LABEL
-        st.session_state.district_focus = ALL_DISTRICTS_LABEL
+        st.session_state.state_focus = DEFAULT_STATE_FOCUS
+        st.session_state.district_focus = DEFAULT_DISTRICT_FOCUS
         st.session_state.confidence_label = "Weak Evidence"
-        st.session_state.latest_result = st.session_state.get("national_result")
+        st.session_state.latest_result = st.session_state.get("starter_result")
         st.rerun()
 
     filter_pills(
@@ -730,14 +732,14 @@ def _render_top_controls() -> tuple[str, str, str, str, bool]:
     return mission_key, state_focus, district_focus, confidence_label, run_button
 
 
-def _show_national_alert(result: dict[str, Any] | None) -> None:
+def _show_recommendation_alert(result: dict[str, Any] | None) -> None:
     if result is None:
-        message = escape(st.session_state.get("national_error", "The India-wide scan is still loading."))
+        message = escape(st.session_state.get("starter_error", "The starter district scan is still loading."))
         st.markdown(
             (
                 "<section class='db-alert-strip'>"
                 "<div><div class='db-alert-kicker'>Recommended next move</div>"
-                "<h2>National scan unavailable</h2>"
+                "<h2>Starter district scan unavailable</h2>"
                 f"<p>{message}</p></div>"
                 "</section>"
             ),
@@ -846,7 +848,7 @@ def _review_label_legend() -> None:
     )
 
 
-def _show_product_intro_page(national_result: dict[str, Any] | None) -> None:
+def _show_product_intro_page(starter_result: dict[str, Any] | None) -> None:
     st.markdown(
         (
             "<section class='db-intro-hero'>"
@@ -930,12 +932,12 @@ def _show_product_intro_page(national_result: dict[str, Any] | None) -> None:
         )
 
     with tabs[2]:
-        if national_result:
-            packet = national_result.get("mission_packet", {})
+        if starter_result:
+            packet = starter_result.get("mission_packet", {})
             card_grid(
                 [
                     {
-                        "title": "Current national action",
+                        "title": "Current starter action",
                         "body": _decision_label(packet.get("action_state", "review")),
                         "caption": _display_text(packet.get("next_verification_action"), "Review before saving."),
                     },
@@ -946,7 +948,7 @@ def _show_product_intro_page(national_result: dict[str, Any] | None) -> None:
                     },
                     {
                         "title": "Uncertainty label",
-                        "body": _confidence_label(packet.get("confidence", national_result.get("confidence_label", "Weak Evidence"))),
+                        "body": _confidence_label(packet.get("confidence", starter_result.get("confidence_label", "Weak Evidence"))),
                         "caption": "Weak evidence appears as a product signal, not a hidden caveat.",
                     },
                 ],
@@ -1662,36 +1664,36 @@ st.set_page_config(page_title="Care Convoy", layout="wide", initial_sidebar_stat
 inject_theme()
 
 st.session_state.setdefault("latest_result", None)
-st.session_state.setdefault("national_result", None)
-st.session_state.setdefault("national_error", "")
-st.session_state.setdefault("national_scan_done", False)
+st.session_state.setdefault("starter_result", None)
+st.session_state.setdefault("starter_error", "")
+st.session_state.setdefault("starter_scan_done", False)
 st.session_state.setdefault("app_page", APP_PAGE_LIVE)
 st.session_state.setdefault("mission_key", "maternal_health")
-st.session_state.setdefault("state_focus", ALL_STATES_LABEL)
-st.session_state.setdefault("district_focus", ALL_DISTRICTS_LABEL)
+st.session_state.setdefault("state_focus", DEFAULT_STATE_FOCUS)
+st.session_state.setdefault("district_focus", DEFAULT_DISTRICT_FOCUS)
 st.session_state.setdefault("confidence_label", "Weak Evidence")
 
-if st.session_state.get("control_surface_version") != "product-usability":
-    st.session_state.control_surface_version = "product-usability"
-    st.session_state.state_focus = ALL_STATES_LABEL
-    st.session_state.district_focus = ALL_DISTRICTS_LABEL
+if st.session_state.get("control_surface_version") != "district-startup":
+    st.session_state.control_surface_version = "district-startup"
+    st.session_state.state_focus = DEFAULT_STATE_FOCUS
+    st.session_state.district_focus = DEFAULT_DISTRICT_FOCUS
     st.session_state.confidence_label = "Weak Evidence"
     st.session_state.stage_view = "Plan"
     st.session_state.stage_view_radio = "Plan"
 
 _hero()
-_ensure_national_result()
+_ensure_starter_result()
 
 if st.session_state.app_page == APP_PAGE_INTRO:
     _render_page_jump()
-    _show_product_intro_page(st.session_state.get("national_result"))
+    _show_product_intro_page(st.session_state.get("starter_result"))
     _render_footer()
     st.stop()
 
 _apply_pending_map_jump()
 
-result = st.session_state.latest_result or st.session_state.get("national_result")
-_show_national_alert(result)
+result = st.session_state.latest_result or st.session_state.get("starter_result")
+_show_recommendation_alert(result)
 
 if result is None:
     _show_empty_state()
