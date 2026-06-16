@@ -120,6 +120,16 @@ _FACILITY_STOPWORDS = {
     "medical",
     "trust",
 }
+_STATE_ALIASES = {
+    "maharashtra": ["Maharashtra", "Maharastra"],
+    "maharastra": ["Maharashtra", "Maharastra"],
+}
+_STATE_KEY_ALIASES = {
+    "maharastra": "maharashtra",
+}
+_STATE_CANONICAL_NAMES = {
+    "maharastra": "Maharashtra",
+}
 
 
 def _tag_source(df: pd.DataFrame, source: str) -> pd.DataFrame:
@@ -160,6 +170,40 @@ def _normalized_name(value: Any) -> str:
 def _location_key(value: Any) -> str:
     text = _safe_text(value).lower()
     return re.sub(r"[^a-z0-9]", "", text)
+
+
+def _state_key(value: Any) -> str:
+    key = _location_key(value)
+    return _STATE_KEY_ALIASES.get(key, key)
+
+
+def _canonical_state_name(value: Any) -> str:
+    text = _safe_text(value)
+    return _STATE_CANONICAL_NAMES.get(_location_key(text), text)
+
+
+def _state_filter_terms(state_filter: str) -> list[str]:
+    text = _safe_text(state_filter)
+    if not text:
+        return []
+    terms = [text, *_STATE_ALIASES.get(_location_key(text), [])]
+    return list(dict.fromkeys(terms))
+
+
+def _state_filter_clause(columns: list[str], state_filter: str, parameters: dict[str, object]) -> str:
+    terms = _state_filter_terms(state_filter)
+    if not terms:
+        return "1 = 1"
+
+    clauses: list[str] = []
+    for index, term in enumerate(terms):
+        parameter_name = "state_filter" if index == 0 else f"state_filter_alias_{index}"
+        parameters[parameter_name] = f"%{term}%"
+        clauses.extend(
+            f"coalesce(lower({column}), '') like lower(:{parameter_name})"
+            for column in columns
+        )
+    return " or ".join(clauses)
 
 
 def _source_urls(value: Any) -> list[str]:
@@ -392,11 +436,7 @@ def _district_density_context(
     parameters: dict[str, object] = {}
     state_clause = "1 = 1"
     if state_filter:
-        state_clause = (
-            "coalesce(lower(pin.statename), '') like lower(:state_filter) or "
-            "coalesce(lower(f.address_stateOrRegion), '') like lower(:state_filter)"
-        )
-        parameters["state_filter"] = f"%{state_filter}%"
+        state_clause = _state_filter_clause(["pin.statename", "f.address_stateOrRegion"], state_filter, parameters)
 
     district_clause = "1 = 1"
     if district_filter:
@@ -441,7 +481,7 @@ def _district_density_context(
         density[column] = pd.to_numeric(density[column], errors="coerce").fillna(0)
 
     density["district_key"] = density["district"].apply(_location_key)
-    density["state_key"] = density["state"].apply(_location_key)
+    density["state_key"] = density["state"].apply(_state_key)
     return density[
         [
             "district",
@@ -516,17 +556,16 @@ def get_district_priorities(
     state_clause = ""
     parameters: dict[str, object] = {}
     if state_filter:
-        state_clause = "where lower(state_ut) like lower(:state_filter)"
-        parameters["state_filter"] = f"%{state_filter}%"
+        state_clause = f"where {_state_filter_clause(['state_ut'], state_filter, parameters)}"
 
     sql = f"""
     select
       district_name as district,
       state_ut as state,
-      coalesce(child_u5_who_are_underweight_weight_for_age_18_pct, 0) as child_underweight_pct,
-      coalesce(hh_member_covered_health_insurance_pct, 0) as insurance_pct,
-      coalesce(institutional_birth_5y_pct, 0) as institutional_birth_pct,
-      coalesce(w15_plus_with_high_bp_sys_gte_140_mmhg_and_or_dia_gte_90_mm_pct, 0) as high_bp_pct
+      coalesce(try_cast(trim(cast(child_u5_who_are_underweight_weight_for_age_18_pct as string)) as double), 0.0) as child_underweight_pct,
+      coalesce(try_cast(trim(cast(hh_member_covered_health_insurance_pct as string)) as double), 0.0) as insurance_pct,
+      coalesce(try_cast(trim(cast(institutional_birth_5y_pct as string)) as double), 0.0) as institutional_birth_pct,
+      coalesce(try_cast(trim(cast(w15_plus_with_high_bp_sys_gte_140_mmhg_and_or_dia_gte_90_mm_pct as string)) as double), 0.0) as high_bp_pct
     from {CATALOG}.{SCHEMA}.nfhs_5_district_health_indicators
     {state_clause}
     limit 50
@@ -536,6 +575,11 @@ def get_district_priorities(
         return _fallback_districts(state_filter)
 
     df = raw.rename(columns=str)
+    df["state"] = df["state"].apply(_canonical_state_name)
+    for column in ["child_underweight_pct", "insurance_pct", "institutional_birth_pct", "high_bp_pct"]:
+        if column not in df:
+            df[column] = 0
+        df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0)
     if district_filter:
         df = df[df["district"].str.contains(district_filter, case=False, na=False, regex=False)]
     if df.empty:
@@ -544,7 +588,7 @@ def get_district_priorities(
     density = _district_density_context(mission_type, state_filter, district_filter)
 
     df["district_key"] = df["district"].apply(_location_key)
-    df["state_key"] = df["state"].apply(_location_key)
+    df["state_key"] = df["state"].apply(_state_key)
     df["need_score"] = (
         df["child_underweight_pct"].fillna(0) * 0.45
         + (100 - df["insurance_pct"].fillna(0)) * 0.2
@@ -1245,8 +1289,7 @@ def get_facility_candidates(
     parameters: dict[str, object] = {}
     state_clause = "1 = 1"
     if state_filter:
-        state_clause = "coalesce(lower(address_stateOrRegion), '') like lower(:state_filter)"
-        parameters["state_filter"] = f"%{state_filter}%"
+        state_clause = _state_filter_clause(["address_stateOrRegion"], state_filter, parameters)
 
     district_clause = "1 = 1"
     if district_filter:

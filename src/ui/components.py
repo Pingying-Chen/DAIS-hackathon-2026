@@ -52,6 +52,22 @@ def card(title: str, body: str, caption: str = "") -> None:
     )
 
 
+def bullet_card(title: str, items: list[str], caption: str = "") -> None:
+    clean_items = [item.strip() for item in items if item.strip()]
+    list_html = "".join(f"<li>{escape(item)}</li>" for item in clean_items)
+    caption_html = f"<div class='db-card-caption'>{escape(caption)}</div>" if caption else ""
+    st.markdown(
+        (
+            f"<section class=\"db-card\">"
+            f"<div class=\"db-card-title\">{escape(title)}</div>"
+            f"<ul class=\"db-bullet-list\">{list_html}</ul>"
+            f"{caption_html}"
+            f"</section>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
 def card_grid(cards: list[dict[str, str]], columns: int = 2) -> None:
     grid_cards: list[str] = []
     for item in cards:
@@ -87,6 +103,15 @@ def inline_metrics(items: list[tuple[str, str]]) -> None:
         for label, value in items
     )
     st.markdown(f"<div class='db-inline-metrics'>{metrics_html}</div>", unsafe_allow_html=True)
+
+
+def filter_pills(items: list[tuple[str, str]]) -> None:
+    pills = "".join(
+        f"<span class='db-filter-pill'><strong>{escape(label)}</strong>{escape(value)}</span>"
+        for label, value in items
+        if value
+    )
+    st.markdown(f"<div class='db-filter-row'>{pills}</div>", unsafe_allow_html=True)
 
 
 def status_stack(messages: list[tuple[str, str]]) -> None:

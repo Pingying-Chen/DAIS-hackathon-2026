@@ -35,5 +35,4 @@ targets:
     default: true
     mode: development
     workspace:
-      host: https://your-databricks-workspace.cloud.databricks.com
-      profile: databricks-profile
+      profile: "free databricks"

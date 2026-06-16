@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from html import escape
 from pathlib import Path
 import sys
 import uuid
@@ -15,7 +16,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.agent.reasoning import run_agent
 from src.db.lakebase import lakebase_available, lakebase_status, list_user_decisions
-from src.ui.components import action_panel, card, card_grid, hero_header, inline_metrics, kpi_row, status_stack
+from src.ui.components import action_panel, bullet_card, card, card_grid, filter_pills, hero_header, inline_metrics, kpi_row, status_stack
+from src.ui.decision_options import decision_options_for_packet
 from src.ui.theme import inject_theme
 from src.viz.charts import build_confidence_chart, build_tradeoff_chart
 from src.viz.maps import render_map
@@ -33,7 +35,29 @@ CONFIDENCE_OPTIONS = {
     "High Confidence": 0.75,
 }
 
-STAGE_VIEWS = ["Overview", "Review Board", "Anchor Review", "Trust Evidence", "Shortlist"]
+STAGE_VIEWS = ["Map + Packet", "Mission Control", "Anchor Review", "Trust Evidence", "Shortlist"]
+
+GATE_LABELS = {
+    "pass": "Pass",
+    "review": "Review",
+    "block": "Block",
+}
+
+GATE_TONES = {
+    "pass": "positive",
+    "review": "warn",
+    "block": "accent",
+}
+
+RUN_STEPS = [
+    ("Need Scout", "Loaded NFHS district indicators and scored need."),
+    ("Supply Mapper", "Joined facility density through pincode and district context."),
+    ("Facility Scout", "Ranked lead and backup referral anchors from provided facilities."),
+    ("Trust Verifier", "Checked entity resolution, website status, and trust signals."),
+    ("Evidence Auditor", "Checked citation rows and uncertainty downgrades."),
+    ("Mission Strategist", "Converted gate outcomes into an operator-ready mission action."),
+    ("Supervisor", "Derived the mission packet action from the weakest gate."),
+]
 
 
 def _format_metric(value: float | int | None) -> str:
@@ -44,21 +68,57 @@ def _format_metric(value: float | int | None) -> str:
     return str(value)
 
 
+def _shorten(value: Any, limit: int = 110) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def _bullet_items(value: str, max_items: int = 6) -> list[str]:
+    lines = [line.strip().lstrip("-*• ").strip() for line in value.splitlines()]
+    items = [line.rstrip(".") for line in lines if line]
+    if len(items) <= 1:
+        chunks = value.replace(";", ".").split(".")
+        items = [chunk.strip().rstrip(".") for chunk in chunks if chunk.strip()]
+    return [_shorten(item, 120) for item in items[:max_items]]
+
+
+def _short_status(message: str) -> str:
+    if message.startswith("Live Databricks SQL"):
+        return "Live data. Trust Desk included."
+    if message.startswith("Demo-safe fallback"):
+        return "Demo-safe fallback."
+    if message.startswith("Mixed sources"):
+        return message.replace(" + ", " + ")
+    if message.startswith("District prioritization"):
+        return "District source: fallback."
+    if message.startswith("Facility ranking"):
+        return "Facility source: fallback."
+    if message.startswith("Facility-density"):
+        return "Supply density needs review."
+    if message.startswith("No facility citation"):
+        return "No citations. Hold claims."
+    if message.startswith("Some facility claims"):
+        return "Some claims lack URLs."
+    if message.startswith("Trust Desk"):
+        return "Website checks need review."
+    if message.startswith("Some facility rows"):
+        return "Possible duplicates need review."
+    return _shorten(message)
+
+
 def _hero() -> None:
     hero_header(
-        eyebrow="Track 3 Referral Copilot",
-        title="Care Convoy",
-        subtitle=(
-            "A Databricks-native referral copilot for India that combines district need, facility capability, "
-            "and a trust-scoring support layer so an operations lead can choose a credible deployment anchor "
-            "without reading raw rows."
-        ),
+        eyebrow="Track 3 Referral Copilot · v5.2 Mission Control",
+        title="Care Convoy Mission Control",
+        subtitle="Plan the next referral move. Check need, supply, trust, and evidence. Save only after review.",
         chips=[
-            ("User", "Virtue Foundation operations lead"),
-            ("Decision", "Where to send the next referral team"),
-            ("Trust layer", "Entity resolution + website corroboration"),
-            ("Persistence", "Lakebase shortlist"),
-            ("Evidence", "Citations and uncertainty visible"),
+            ("User", "Virtue operations lead"),
+            ("Decision", "Next referral move"),
+            ("Mode", "Pass / review / block"),
+            ("Save", "Lakebase shortlist"),
+            ("Population", "Planned, not active"),
         ],
     )
 
@@ -66,22 +126,25 @@ def _hero() -> None:
 def _summary_metrics(result: dict[str, Any] | None) -> None:
     if result is None:
         items = [
-            {"label": "App State", "value": "Ready", "value_class": "db-kpi-accent", "note": "Choose a care need and build the referral plan."},
-            {"label": "Track", "value": "3", "note": "Referral Copilot with a supporting trust layer."},
-            {"label": "Data Path", "value": "India Facilities", "note": "Unity Catalog facilities plus district context."},
-            {"label": "Persistence", "value": "Lakebase", "note": "Saved shortlist decisions survive refresh."},
+            {"label": "Mission Control", "value": "Ready", "value_class": "db-kpi-accent", "note": "Choose care need. Run plan."},
+            {"label": "Track", "value": "3", "note": "Referral Copilot. Trust support."},
+            {"label": "Data Path", "value": "Virtue", "note": "Facilities. NFHS. Pincodes."},
+            {"label": "Persistence", "value": "Lakebase", "note": "Saved decisions reload."},
         ]
     else:
         trust_reviews = result.get("trust_reviews")
         verified_count = 0
         if trust_reviews is not None and not trust_reviews.empty:
             verified_count = int(trust_reviews["website_verification_status"].eq("verified").sum())
+        packet = result.get("mission_packet", {})
+        trace = result.get("mission_control_trace", [])
+        gate_counts = _gate_counts(trace)
         items = [
-            {"label": "Referral Confidence", "value": result["confidence_label"], "value_class": "db-kpi-accent", "note": "Confidence in the lead referral anchor after trust scoring."},
-            {"label": "Board Agents", "value": str(len(result.get("review_board", []))), "note": "Review Board v3 agents checking need, fit, trust, and evidence."},
-            {"label": "Priority Districts", "value": str(len(result["districts"])), "note": "Districts returned for the current mission."},
-            {"label": "Candidate Facilities", "value": str(len(result["facilities"])), "note": "Resolved facilities ranked for referral action."},
-            {"label": "Verified Websites", "value": str(verified_count), "note": "Facility websites corroborated by the trust support layer."},
+            {"label": "Packet Action", "value": str(packet.get("action_state", "review")).title(), "value_class": "db-kpi-accent", "note": "Weakest gate decides."},
+            {"label": "Gate Mix", "value": f"{gate_counts['pass']}/{gate_counts['review']}/{gate_counts['block']}", "note": "Pass / review / block."},
+            {"label": "Priority Districts", "value": str(len(result["districts"])), "note": "Live district rows."},
+            {"label": "Candidate Anchors", "value": str(len(result["facilities"])), "note": "Ranked facilities."},
+            {"label": "Verified Websites", "value": str(verified_count), "note": "Trust support signal."},
         ]
     kpi_row(items)
 
@@ -90,31 +153,126 @@ def _show_empty_state() -> None:
     card_grid(
         [
             {
-                "title": "What this app helps you decide",
-                "body": (
-                    "Run the referral copilot, inspect the district map and facility shortlist, then use the trust layer "
-                    "to verify whether the recommended anchor looks credible enough to act on."
-                ),
-                "caption": "The opening screen should make the review decision obvious before any technical detail appears.",
+                "title": "Mission Control opens here",
+                "body": "Build a plan. Review gates. Save a packet.",
+                "caption": "v5.2 keeps humans in control.",
             },
             {
-                "title": "What to click first",
-                "body": (
-                    "Choose a care need, keep or tighten the state and district filters, then click Build Referral Plan "
-                    "to generate a shortlist with trust-backed evidence."
-                ),
-                "caption": "Results stay inside the main workspace views so the sidebar remains input-only.",
+                "title": "Population context is planned",
+                "body": "Not active yet. Rankings stay dataset-backed.",
+                "caption": "Intentional demo scope.",
             },
         ]
     )
 
 
 def _result_status_messages(result: dict[str, Any]) -> list[tuple[str, str]]:
-    messages: list[tuple[str, str]] = [("info", result["provenance"])]
+    messages: list[tuple[str, str]] = [("info", _short_status(result["provenance"]))]
     if result.get("summary_source"):
-        messages.append(("info", f"Mission brief source: {result['summary_source']}"))
-    messages.extend(("warn", warning) for warning in result["warnings"])
+        messages.append(("info", f"Brief: {result['summary_source']}"))
+    messages.extend(("warn", _short_status(warning)) for warning in result["warnings"])
     return messages
+
+
+def _gate_counts(trace: list[dict[str, str]]) -> dict[str, int]:
+    counts = {"pass": 0, "review": 0, "block": 0}
+    for item in trace:
+        gate = item.get("gate", "review")
+        if gate in counts:
+            counts[gate] += 1
+    return counts
+
+
+def _gate_badge(gate: str) -> str:
+    tone = GATE_TONES.get(gate, "warn")
+    label = GATE_LABELS.get(gate, "Review")
+    return f"<span class='db-gate db-gate-{escape(tone)}'>{escape(label)}</span>"
+
+
+def _mission_packet_items(packet: dict[str, Any]) -> list[dict[str, str]]:
+    return [
+        {
+            "title": "Lead district",
+            "body": f"{packet.get('lead_district', 'No district')}, {packet.get('lead_state', '')}",
+            "caption": _shorten(packet.get("nfhs_signals", "NFHS context unavailable")),
+        },
+        {
+            "title": "Lead anchor",
+            "body": str(packet.get("lead_anchor", "No lead anchor")),
+            "caption": f"Backup: {packet.get('backup_anchor', 'No backup anchor')}",
+        },
+        {
+            "title": "Coverage context",
+            "body": _shorten(packet.get("facility_density_context", "Facility density unavailable")),
+            "caption": str(packet.get("population_context_status", "Population context unavailable")),
+        },
+        {
+            "title": "Next action",
+            "body": str(packet.get("next_verification_action", "Review this packet before saving.")),
+            "caption": f"Citations: {packet.get('citation_status', 'unknown')}",
+        },
+    ]
+
+
+def _render_tool_steps() -> None:
+    html = "".join(
+        (
+            "<div class='db-step-card'>"
+            f"<span class='db-step-dot'>{index}</span>"
+            f"<div><div class='db-step-title'>{escape(label)}</div>"
+            f"<div class='db-step-detail'>{escape(detail)}</div></div>"
+            "</div>"
+        )
+        for index, (label, detail) in enumerate(RUN_STEPS, start=1)
+    )
+    st.markdown(f"<section class='db-step-stack'>{html}</section>", unsafe_allow_html=True)
+
+
+def _show_mission_control(result: dict[str, Any]) -> None:
+    trace = result.get("mission_control_trace") or result.get("review_board", [])
+    packet = result.get("mission_packet", {})
+    left, right = st.columns([1.15, 0.85], gap="large")
+
+    with left:
+        st.markdown("<div class='db-section-label'>Agent gate trace</div>", unsafe_allow_html=True)
+        with st.popover("Terms"):
+            st.markdown(
+                "- **Gate:** pass, review, or block.\n"
+                "- **Density:** mapped facility supply.\n"
+                "- **Citation safety:** claim has source evidence.\n"
+                "- **Strategist:** turns gates into action."
+            )
+        for item in trace:
+            gate = item.get("gate", "review")
+            reason = item.get("blocking_reason") or item.get("handoff", "")
+            st.markdown(
+                (
+                    "<section class='db-agent-row'>"
+                    f"{_gate_badge(gate)}"
+                    "<div class='db-agent-main'>"
+                    f"<div class='db-agent-title'>{escape(item.get('agent', 'Agent'))}</div>"
+                    f"<div class='db-agent-role'>{escape(item.get('role', ''))}</div>"
+                    f"<div class='db-agent-evidence'>{escape(item.get('evidence', ''))}</div>"
+                    f"<div class='db-agent-handoff'>{escape(reason)}</div>"
+                    "</div>"
+                    "</section>"
+                ),
+                unsafe_allow_html=True,
+            )
+
+    with right:
+        action = str(packet.get("action_state", "review")).title()
+        bullet_card(
+            f"Supervisor action: {action}",
+            [
+                f"Next: {packet.get('next_verification_action', result.get('board_summary', 'Review first.'))}",
+                f"Confidence: {packet.get('confidence', result.get('confidence_label', 'Weak Evidence'))}",
+                f"Citations: {packet.get('citation_status', 'unknown')}",
+            ],
+            "Review before saving.",
+        )
+        _render_tool_steps()
+        status_stack(_result_status_messages(result))
 
 
 def _shortlist_display(saved: pd.DataFrame) -> pd.DataFrame:
@@ -125,6 +283,9 @@ def _shortlist_display(saved: pd.DataFrame) -> pd.DataFrame:
     display["board_verdict"] = metadata.apply(lambda value: value.get("board_verdict", ""))
     display["board_confidence"] = metadata.apply(lambda value: value.get("board_confidence", ""))
     display["facility_name"] = metadata.apply(lambda value: value.get("facility_name", ""))
+    display["packet_action"] = metadata.apply(
+        lambda value: value.get("mission_packet", {}).get("action_state", value.get("board_verdict", ""))
+    )
     return display[
         [
             "created_at",
@@ -132,7 +293,7 @@ def _shortlist_display(saved: pd.DataFrame) -> pd.DataFrame:
             "district",
             "facility_name",
             "decision",
-            "board_verdict",
+            "packet_action",
             "board_confidence",
             "note",
         ]
@@ -161,16 +322,17 @@ def _show_overview(result: dict[str, Any]) -> None:
     with left:
         render_map(districts, facilities, height=430)
         st.markdown(
-            "<p class='db-map-caption'>Blue points show district demand context. Red points show the facilities being reviewed for credibility.</p>",
+            "<p class='db-map-caption'>District points show demand context; facility points show anchors being reviewed for credibility.</p>",
             unsafe_allow_html=True,
         )
 
     with right:
-        card("What this run says", result["summary"], result["provenance"])
+        packet = result.get("mission_packet", {})
+        bullet_card("Mission packet", _bullet_items(result["summary"]), _short_status(result["provenance"]))
         inline_metrics(
             [
                 ("Care need", result["mission_label"]),
-                ("Referral confidence", result["confidence_label"]),
+                ("Packet action", str(packet.get("action_state", "review")).title()),
                 ("Shortlist mode", "Lakebase" if lakebase_available() else "Not configured"),
                 (
                     "Lead website status",
@@ -179,47 +341,61 @@ def _show_overview(result: dict[str, Any]) -> None:
             ]
         )
         if top_facility is not None:
-            card(
+            bullet_card(
                 f"Lead referral anchor: {top_facility['name']}",
-                (
-                    f"Capability fit {top_facility['capability_fit']:.0f}, trust score {top_facility['trust_score']:.0f}, "
-                    f"resolved entity {top_facility['resolved_entity_id']} built from {int(top_facility['entity_record_count'])} source row(s)."
-                ),
+                [
+                    f"Fit: {top_facility['capability_fit']:.0f}",
+                    f"Trust: {top_facility['trust_score']:.0f}",
+                    f"Entity rows: {int(top_facility['entity_record_count'])}",
+                    f"Website: {top_facility['website_verification_status']}",
+                ],
                 top_facility["risk_flags"] or "No facility review flags.",
             )
         if result.get("board_summary"):
-            card("Convoy Review Board v3", result["board_summary"], "Six specialized agents review the recommendation before it becomes a shortlist action.")
+            bullet_card(
+                "Mission Control v5.2",
+                [
+                    _shorten(result["board_summary"], 90),
+                    "Seven visible gates.",
+                    "Weakest gate sets action.",
+                ],
+                "Review before saving.",
+            )
         if top_district is not None:
             district_caption = top_district["uncertainty_label"]
             density_context = str(top_district.get("facility_density_context", "") or "")
             nfhs_summary = str(top_district.get("nfhs_need_summary", "") or "")
             if density_context:
-                district_caption = f"{district_caption}. {density_context}"
-            card(
+                district_caption = f"{district_caption}. {_shorten(density_context, 90)}"
+            bullet_card(
                 f"Highest-need district context: {top_district['district']}, {top_district['state']}",
-                (
-                    f"Need score {top_district['need_score']:.1f}, coverage gap {top_district['coverage_gap']:.1f}, "
-                    f"evidence score {top_district['evidence_score']:.1f}. {nfhs_summary}"
-                ),
+                [
+                    f"Need: {top_district['need_score']:.1f}",
+                    f"Coverage gap: {top_district['coverage_gap']:.1f}",
+                    f"Evidence: {top_district['evidence_score']:.1f}",
+                    _shorten(nfhs_summary, 92),
+                ],
                 district_caption,
             )
         action_panel(
             "What to do next",
-            "Use the other views to decide whether this facility is the right anchor for the referral plan.",
+            "Review in this order.",
             [
-                "Open Review Board to see each agent verdict and the supervisor recommendation.",
-                "Open Anchor Review to inspect merged entities and compare the top facility candidates.",
-                "Open Trust Evidence to see website corroboration, duplicate checks, and citations.",
-                "Save the shortlist entry only after the trust signals support the referral recommendation.",
+                "Check Mission Control gates.",
+                "Compare anchor candidates.",
+                "Review trust evidence.",
+                "Save only after verification.",
             ],
         )
         status_stack(_result_status_messages(result))
+        if packet:
+            card_grid(_mission_packet_items(packet), columns=1)
 
 
 def _show_review_board(result: dict[str, Any]) -> None:
     board = result.get("review_board", [])
     if not board:
-        st.info("Review Board v3 appears once a referral plan has been built.")
+        st.info("Mission Control appears once a referral plan has been built.")
         return
 
     board_frame = pd.DataFrame(board)
@@ -249,14 +425,15 @@ def _show_review_board(result: dict[str, Any]) -> None:
             f"Final confidence: {supervisor['confidence']}",
         )
         action_panel(
-            "How v3 decides",
-            "The review board separates the placement decision into specialized checks before the app asks the operator to save a plan.",
+            "How Mission Control decides",
+            "One gate per risk.",
             [
-                "Need Scout validates district demand.",
-                "Facility Scout checks operational capability fit.",
-                "Trust Verifier reuses Trust Desk v2 entity and website scoring.",
-                "Evidence Auditor blocks unsupported claims.",
-                "Referral Strategist and Supervisor turn the checks into an action state.",
+                "Need Scout: district demand.",
+                "Supply Mapper: facility density.",
+                "Facility Scout: anchor fit.",
+                "Trust Verifier: website and entity checks.",
+                "Evidence Auditor: citation safety.",
+                "Supervisor: final action.",
             ],
         )
 
@@ -289,10 +466,9 @@ def _show_anchors(result: dict[str, Any]) -> None:
                 {
                     "title": row.name,
                     "body": (
-                        f"{row.address_city}, {row.address_stateOrRegion}. Trust {row.trust_score:.0f}, fit {row.capability_fit:.0f}, "
-                        f"website {row.website_verification_status}, entity rows {int(row.entity_record_count)}."
+                        f"{row.address_city}, {row.address_stateOrRegion}. Trust {row.trust_score:.0f}. Fit {row.capability_fit:.0f}."
                     ),
-                    "caption": row.risk_flags or row.confidence_label,
+                    "caption": _shorten(row.risk_flags or row.confidence_label),
                 }
             )
         card_grid(cards)
@@ -362,24 +538,22 @@ def _show_trust_desk(result: dict[str, Any]) -> None:
             cards.append(
                 {
                     "title": review.facility_name,
-                    "body": (
-                    f"Status {review.review_status}, website {review.website_verification_status}, "
-                    f"trust {review.trust_score_v2:.0f}, entity rows {review.entity_record_count}, "
-                    f"match confidence {review.entity_match_confidence:.2f}."
-                    ),
-                    "caption": review.risk_flags or review.entity_match_reasons or "No extra review notes.",
+                    "body": f"Status {review.review_status}. Website {review.website_verification_status}. Trust {review.trust_score_v2:.0f}.",
+                    "caption": _shorten(review.risk_flags or review.entity_match_reasons or "No extra review notes."),
                 }
             )
         card_grid(cards)
 
     with right:
-        card(
+        bullet_card(
             "How the trust support layer works",
-            (
-                "Each facility row is cleaned and merged into a resolved entity, then the app checks a selected public website and "
-                "combines those signals with the social-media features already present in the dataset."
-            ),
-            "The trust score supports the referral choice; it does not replace the referral decision itself.",
+            [
+                "Merge likely duplicate rows.",
+                "Check selected public website.",
+                "Use dataset social signals.",
+                "Support the referral choice.",
+            ],
+            "Trust supports. It does not replace judgment.",
         )
         st.dataframe(result["citations"], use_container_width=True, hide_index=True, height=300)
         search_results = result.get("search_results")
@@ -438,8 +612,8 @@ def _show_shortlist(result: dict[str, Any]) -> None:
         else:
             card(
                 "No shortlist entries yet",
-                "Save the current lead facility after reviewing its trust status to create a durable decision record.",
-                "The shortlist is the impact beat: it proves the run produced a persistent action.",
+                "Save after trust review.",
+                "Persistence proves action.",
             )
 
     with right:
@@ -450,21 +624,22 @@ def _show_shortlist(result: dict[str, Any]) -> None:
         district = top_district.iloc[0]
         board_agents = result.get("review_board", [])
         supervisor = board_agents[-1] if board_agents else {}
+        mission_packet = result.get("mission_packet", {})
         default_note = f"Review {candidate['name']} for {district['district']} as the first referral anchor."
-        card(
+        bullet_card(
             "Ready to save",
-            (
-                f"{candidate['name']} is the current lead candidate for {district['district']}, {district['state']}. "
-                f"Save only after the trust evidence and duplicate-review flags look acceptable."
-            ),
-            candidate["risk_flags"] or "No extra risk flags on the lead candidate.",
+            [
+                f"Anchor: {candidate['name']}",
+                f"District: {district['district']}, {district['state']}",
+                f"Confidence: {candidate['confidence_label']}",
+                "Save only after trust review.",
+            ],
+            _shorten(candidate["risk_flags"] or "No extra risk flags."),
         )
 
         with st.form("save_shortlist"):
             note = st.text_area("Verification note", value=default_note, height=110)
-            decision_options = ["needs verification", "approved", "hold"]
-            if supervisor.get("verdict") == "hold for evidence" or supervisor.get("confidence") == "Weak Evidence":
-                decision_options = ["needs verification", "hold"]
+            decision_options = decision_options_for_packet(mission_packet)
             decision = st.selectbox("Decision status", decision_options)
             submitted = st.form_submit_button("Save shortlist item")
 
@@ -481,6 +656,8 @@ def _show_shortlist(result: dict[str, Any]) -> None:
                 "board_verdict": supervisor.get("verdict", ""),
                 "board_confidence": supervisor.get("confidence", ""),
                 "board_agents": [agent["agent"] for agent in board_agents],
+                "mission_packet": result.get("mission_packet", {}),
+                "mission_control_trace": result.get("mission_control_trace", []),
             }
             from src.agent.tools import save_user_decision
 
@@ -505,12 +682,12 @@ def _stage_selector() -> str:
         selected = segmented(
             "Review View",
             STAGE_VIEWS,
-            default="Overview",
+            default="Map + Packet",
             selection_mode="single",
             label_visibility="collapsed",
             key="stage_view",
         )
-        return selected or "Overview"
+        return selected or "Map + Packet"
 
     return st.radio(
         "Review View",
@@ -524,10 +701,10 @@ def _stage_selector() -> str:
 
 @st.fragment
 def _render_stage(view: str, result: dict[str, Any]) -> None:
-    if view == "Overview":
+    if view == "Mission Control":
+        _show_mission_control(result)
+    elif view == "Map + Packet":
         _show_overview(result)
-    elif view == "Review Board":
-        _show_review_board(result)
     elif view == "Anchor Review":
         _show_anchors(result)
     elif view == "Trust Evidence":
@@ -541,22 +718,39 @@ inject_theme()
 
 _hero()
 
+st.session_state.setdefault("latest_result", None)
+st.session_state.setdefault("mission_key", "maternal_health")
+st.session_state.setdefault("state_focus", "Maharashtra")
+st.session_state.setdefault("district_focus", "")
+st.session_state.setdefault("confidence_label", "Weak Evidence")
+
 with st.sidebar:
     st.subheader("Mission Setup")
-    mission_key = st.selectbox("Care need", list(MISSION_OPTIONS), format_func=MISSION_OPTIONS.get)
-    state_filter = st.text_input("State focus", value="Maharashtra")
-    district_filter = st.text_input("District focus", value="")
-    confidence_label = st.select_slider("Minimum certainty", options=list(CONFIDENCE_OPTIONS))
+    filter_pills(
+        [
+            ("Need", MISSION_OPTIONS[str(st.session_state.mission_key)]),
+            ("State", str(st.session_state.state_focus) or "India"),
+            ("Certainty", str(st.session_state.confidence_label)),
+        ]
+    )
+    if st.button("Clear filters", use_container_width=True):
+        st.session_state.mission_key = "maternal_health"
+        st.session_state.state_focus = "Maharashtra"
+        st.session_state.district_focus = ""
+        st.session_state.confidence_label = "Weak Evidence"
+        st.session_state.latest_result = None
+        st.rerun()
+    mission_key = st.selectbox("Care need", list(MISSION_OPTIONS), format_func=MISSION_OPTIONS.get, key="mission_key")
+    state_filter = st.text_input("State focus", key="state_focus")
+    district_filter = st.text_input("District focus", key="district_focus")
+    confidence_label = st.select_slider("Minimum certainty", options=list(CONFIDENCE_OPTIONS), key="confidence_label")
     run_button = st.button("Build Referral Plan", type="primary", use_container_width=True)
     lakebase = lakebase_status()
     st.caption("Shortlist mode: Lakebase" if lakebase_available() else "Shortlist mode: Lakebase not configured yet")
     st.caption(lakebase["detail"])
 
-if "latest_result" not in st.session_state:
-    st.session_state.latest_result = None
-
 if run_button:
-    with st.spinner("Resolving entities, checking websites, and scoring trust..."):
+    with st.spinner("Running agent gates..."):
         st.session_state.latest_result = run_agent(
             mission_type=mission_key,
             mission_label=MISSION_OPTIONS[mission_key],

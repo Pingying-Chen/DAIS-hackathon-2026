@@ -1,11 +1,11 @@
 [theme]
-brand_hue = 14
-accent_hue = 221
-data_hue = 217
-energy_hue = 38
-bg_lightness = 99
-glass_opacity = 0.92
-shape_corner_px = 10
+brand_hue = 164
+accent_hue = 174
+data_hue = 207
+energy_hue = 41
+bg_lightness = 7
+glass_opacity = 0.86
+shape_corner_px = 8
 motion_base_ms = 50
 font_family = "Manrope"
 density = "compact"
