@@ -190,13 +190,18 @@ def _show_overview(result: dict[str, Any]) -> None:
         if result.get("board_summary"):
             card("Convoy Review Board v3", result["board_summary"], "Six specialized agents review the recommendation before it becomes a shortlist action.")
         if top_district is not None:
+            district_caption = top_district["uncertainty_label"]
+            density_context = str(top_district.get("facility_density_context", "") or "")
+            nfhs_summary = str(top_district.get("nfhs_need_summary", "") or "")
+            if density_context:
+                district_caption = f"{district_caption}. {density_context}"
             card(
                 f"Highest-need district context: {top_district['district']}, {top_district['state']}",
                 (
                     f"Need score {top_district['need_score']:.1f}, coverage gap {top_district['coverage_gap']:.1f}, "
-                    f"evidence score {top_district['evidence_score']:.1f}."
+                    f"evidence score {top_district['evidence_score']:.1f}. {nfhs_summary}"
                 ),
-                top_district["uncertainty_label"],
+                district_caption,
             )
         action_panel(
             "What to do next",

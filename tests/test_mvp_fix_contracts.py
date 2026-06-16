@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from src.agent import reasoning
+from src.agent import tools
 from src.agent.tools import build_evidence_rows
 from src.db import lakebase
 
@@ -480,6 +481,104 @@ def test_build_evidence_rows_uses_clean_url_from_json_array() -> None:
 
     assert not rows.empty
     assert set(rows["source_url"]) == {"https://example.org/a"}
+
+
+def test_get_district_priorities_adds_nfhs_and_facility_density_context(monkeypatch) -> None:
+    def fake_run_sql(statement: str, timeout_seconds: int = 20, parameters: dict[str, object] | None = None) -> pd.DataFrame:
+        if "nfhs_5_district_health_indicators" in statement:
+            return pd.DataFrame(
+                [
+                    {
+                        "district": "Nagpur",
+                        "state": "Maharashtra",
+                        "child_underweight_pct": 34.0,
+                        "insurance_pct": 24.0,
+                        "institutional_birth_pct": 68.0,
+                        "high_bp_pct": 18.0,
+                    },
+                    {
+                        "district": "Nashik",
+                        "state": "Maharashtra",
+                        "child_underweight_pct": 22.0,
+                        "insurance_pct": 60.0,
+                        "institutional_birth_pct": 92.0,
+                        "high_bp_pct": 11.0,
+                    },
+                ]
+            )
+        if "india_post_pincode_directory" in statement:
+            return pd.DataFrame(
+                [
+                    {
+                        "district": "Nagpur",
+                        "state": "Maharashtra",
+                        "facility_count": 2,
+                        "mission_facility_count": 1,
+                        "latitude": 21.14,
+                        "longitude": 79.08,
+                    },
+                    {
+                        "district": "Nashik",
+                        "state": "Maharashtra",
+                        "facility_count": 12,
+                        "mission_facility_count": 6,
+                        "latitude": 19.99,
+                        "longitude": 73.78,
+                    },
+                ]
+            )
+        return pd.DataFrame()
+
+    monkeypatch.setattr(tools, "run_sql", fake_run_sql)
+
+    districts = tools.get_district_priorities(
+        mission_type="maternal_health",
+        state_filter="Maharashtra",
+        district_filter="",
+        confidence_threshold=0.25,
+    )
+
+    nagpur = districts[districts["district"] == "Nagpur"].iloc[0]
+    assert districts.attrs["source"] == "live"
+    assert int(nagpur["facility_count"]) == 2
+    assert int(nagpur["mission_facility_count"]) == 1
+    assert "NFHS" in nagpur["nfhs_need_summary"]
+    assert "mission-matching" in nagpur["facility_density_context"]
+    assert nagpur["density_confidence_label"] == "Moderate Confidence"
+    assert float(nagpur["coverage_gap"]) > 0
+
+
+def test_get_district_priorities_labels_missing_density_as_ambiguous(monkeypatch) -> None:
+    def fake_run_sql(statement: str, timeout_seconds: int = 20, parameters: dict[str, object] | None = None) -> pd.DataFrame:
+        if "nfhs_5_district_health_indicators" in statement:
+            return pd.DataFrame(
+                [
+                    {
+                        "district": "Nagpur",
+                        "state": "Maharashtra",
+                        "child_underweight_pct": 34.0,
+                        "insurance_pct": 24.0,
+                        "institutional_birth_pct": 68.0,
+                        "high_bp_pct": 18.0,
+                    }
+                ]
+            )
+        return pd.DataFrame()
+
+    monkeypatch.setattr(tools, "run_sql", fake_run_sql)
+
+    districts = tools.get_district_priorities(
+        mission_type="maternal_health",
+        state_filter="Maharashtra",
+        district_filter="",
+        confidence_threshold=0.25,
+    )
+
+    district = districts.iloc[0]
+    assert districts.attrs["source"] == "live"
+    assert int(district["facility_count"]) == 0
+    assert district["density_confidence_label"] == "Data Ambiguous"
+    assert "facility density under review" in district["risk_flags"]
 
 
 def test_list_user_decisions_returns_empty_frame_on_boundary_error(monkeypatch) -> None:

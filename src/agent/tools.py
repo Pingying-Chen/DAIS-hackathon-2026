@@ -354,18 +354,157 @@ def _fallback_facilities(state_filter: str) -> pd.DataFrame:
     return _tag_source(pd.DataFrame(data), "fallback")
 
 
-def _keyword_sql(mission_type: str) -> str:
+def _keyword_sql(mission_type: str, table_alias: str = "") -> str:
     parts = []
     for keyword in MISSION_KEYWORDS.get(mission_type, []):
         safe = keyword.replace("'", "''")
         parts.append(
-            "(coalesce(lower(specialties), '') like '%{k}%' or "
-            "coalesce(lower(procedure), '') like '%{k}%' or "
-            "coalesce(lower(equipment), '') like '%{k}%' or "
-            "coalesce(lower(capability), '') like '%{k}%' or "
-            "coalesce(lower(description), '') like '%{k}%')".format(k=safe)
+            "(coalesce(lower({a}specialties), '') like '%{k}%' or "
+            "coalesce(lower({a}procedure), '') like '%{k}%' or "
+            "coalesce(lower({a}equipment), '') like '%{k}%' or "
+            "coalesce(lower({a}capability), '') like '%{k}%' or "
+            "coalesce(lower({a}description), '') like '%{k}%')".format(a=table_alias, k=safe)
         )
     return " or ".join(parts) or "1 = 1"
+
+
+def _empty_density_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        columns=[
+            "district",
+            "state",
+            "facility_count",
+            "mission_facility_count",
+            "latitude",
+            "longitude",
+            "district_key",
+            "state_key",
+        ]
+    )
+
+
+def _district_density_context(
+    mission_type: str,
+    state_filter: str,
+    district_filter: str,
+) -> pd.DataFrame:
+    keyword_filter = _keyword_sql(mission_type, "f.")
+    parameters: dict[str, object] = {}
+    state_clause = "1 = 1"
+    if state_filter:
+        state_clause = (
+            "coalesce(lower(pin.statename), '') like lower(:state_filter) or "
+            "coalesce(lower(f.address_stateOrRegion), '') like lower(:state_filter)"
+        )
+        parameters["state_filter"] = f"%{state_filter}%"
+
+    district_clause = "1 = 1"
+    if district_filter:
+        district_clause = (
+            "coalesce(lower(pin.district), '') like lower(:district_filter) or "
+            "coalesce(lower(f.address_city), '') like lower(:district_filter) or "
+            "coalesce(lower(f.address_zipOrPostcode), '') like lower(:district_filter)"
+        )
+        parameters["district_filter"] = f"%{district_filter}%"
+
+    sql = f"""
+    select
+      coalesce(nullif(pin.district, ''), f.address_city) as district,
+      coalesce(nullif(pin.statename, ''), f.address_stateOrRegion) as state,
+      count(distinct f.unique_id) as facility_count,
+      count(distinct case when ({keyword_filter}) then f.unique_id end) as mission_facility_count,
+      avg(cast(f.latitude as double)) as latitude,
+      avg(cast(f.longitude as double)) as longitude
+    from {CATALOG}.{SCHEMA}.facilities f
+    left join {CATALOG}.{SCHEMA}.india_post_pincode_directory pin
+      on regexp_replace(coalesce(f.address_zipOrPostcode, ''), '[^0-9]', '') = cast(pin.pincode as string)
+    where coalesce(lower(f.address_country), '') like '%india%'
+      and ({state_clause})
+      and ({district_clause})
+    group by
+      coalesce(nullif(pin.district, ''), f.address_city),
+      coalesce(nullif(pin.statename, ''), f.address_stateOrRegion)
+    limit 500
+    """
+    raw = run_sql(sql, parameters=parameters)
+    if raw.empty:
+        return _empty_density_frame()
+
+    density = raw.rename(columns=str).copy()
+    for column in ["district", "state"]:
+        if column not in density:
+            density[column] = ""
+        density[column] = density[column].apply(_safe_text)
+    for column in ["facility_count", "mission_facility_count", "latitude", "longitude"]:
+        if column not in density:
+            density[column] = 0
+        density[column] = pd.to_numeric(density[column], errors="coerce").fillna(0)
+
+    density["district_key"] = density["district"].apply(_location_key)
+    density["state_key"] = density["state"].apply(_location_key)
+    return density[
+        [
+            "district",
+            "state",
+            "facility_count",
+            "mission_facility_count",
+            "latitude",
+            "longitude",
+            "district_key",
+            "state_key",
+        ]
+    ]
+
+
+def _density_confidence_label(row: pd.Series) -> str:
+    if not bool(row.get("density_matched", False)):
+        return "Data Ambiguous"
+    mission_facility_count = _parse_number(row.get("mission_facility_count"))
+    facility_count = _parse_number(row.get("facility_count"))
+    if mission_facility_count >= 4:
+        return "High Confidence"
+    if mission_facility_count >= 1 or facility_count >= 3:
+        return "Moderate Confidence"
+    return "Weak Evidence"
+
+
+def _density_gap(row: pd.Series) -> float:
+    if not bool(row.get("density_matched", False)):
+        return 68.0
+    facility_count = _parse_number(row.get("facility_count"))
+    mission_facility_count = _parse_number(row.get("mission_facility_count"))
+    supply_score = min(100.0, mission_facility_count * 18 + max(facility_count - mission_facility_count, 0) * 3)
+    return max(0.0, 100.0 - supply_score)
+
+
+def _nfhs_need_summary(row: pd.Series) -> str:
+    return (
+        "NFHS: "
+        f"child underweight {float(row['child_underweight_pct']):.1f}%, "
+        f"insurance coverage {float(row['insurance_pct']):.1f}%, "
+        f"institutional birth {float(row['institutional_birth_pct']):.1f}%, "
+        f"high BP {float(row['high_bp_pct']):.1f}%."
+    )
+
+
+def _facility_density_summary(row: pd.Series) -> str:
+    if not bool(row.get("density_matched", False)):
+        return "No district-level facility density row matched; treat supply gap as ambiguous."
+    return (
+        f"{int(_parse_number(row.get('facility_count')))} facility row(s) matched this district/state; "
+        f"{int(_parse_number(row.get('mission_facility_count')))} mission-matching anchor row(s) were found."
+    )
+
+
+def _district_risk_flags(row: pd.Series) -> str:
+    flags: list[str] = []
+    if row.get("uncertainty_label") != "High Confidence":
+        flags.append("district join under review")
+    if row.get("density_confidence_label") == "Data Ambiguous":
+        flags.append("facility density under review")
+    elif row.get("density_confidence_label") == "Weak Evidence":
+        flags.append("facility density is sparse")
+    return "; ".join(flags)
 
 
 def get_district_priorities(
@@ -402,6 +541,10 @@ def get_district_priorities(
     if df.empty:
         return _fallback_districts(state_filter)
 
+    density = _district_density_context(mission_type, state_filter, district_filter)
+
+    df["district_key"] = df["district"].apply(_location_key)
+    df["state_key"] = df["state"].apply(_location_key)
     df["need_score"] = (
         df["child_underweight_pct"].fillna(0) * 0.45
         + (100 - df["insurance_pct"].fillna(0)) * 0.2
@@ -413,22 +556,53 @@ def get_district_priorities(
     elif mission_type == "general_access":
         df["need_score"] = df["need_score"] + (100 - df["insurance_pct"].fillna(0)) * 0.2
 
-    df["coverage_gap"] = (df["need_score"] * 0.78).clip(0, 100)
-    df["facility_count"] = 0
-    df["evidence_score"] = (100 - df["coverage_gap"] * 0.35).clip(15, 95)
-    df["priority_score"] = (df["need_score"] * 0.6 + df["coverage_gap"] * 0.4).clip(0, 100)
+    if not density.empty:
+        df = df.merge(
+            density.drop(columns=["district", "state"]),
+            on=["district_key", "state_key"],
+            how="left",
+        )
+    else:
+        df["facility_count"] = 0
+        df["mission_facility_count"] = 0
+        df["latitude"] = 0
+        df["longitude"] = 0
+        df["density_matched"] = False
+
+    if "density_matched" not in df:
+        df["density_matched"] = df["facility_count"].notna()
+    df["facility_count"] = pd.to_numeric(df["facility_count"], errors="coerce").fillna(0)
+    df["mission_facility_count"] = pd.to_numeric(df["mission_facility_count"], errors="coerce").fillna(0)
+    df["density_confidence_label"] = df.apply(_density_confidence_label, axis=1)
+    df["density_gap"] = df.apply(_density_gap, axis=1)
+    df["coverage_gap"] = (df["need_score"] * 0.45 + df["density_gap"] * 0.55).clip(0, 100)
+    df["evidence_score"] = (
+        45
+        + df["density_matched"].astype(int) * 20
+        + df["mission_facility_count"].clip(0, 5) * 4
+        + (100 - df["coverage_gap"]).clip(0, 100) * 0.1
+    ).clip(15, 95)
+    df["priority_score"] = (df["need_score"] * 0.52 + df["coverage_gap"] * 0.48).clip(0, 100)
     df["uncertainty_label"] = df["evidence_score"].apply(_district_confidence_label)
-    df["risk_flags"] = df["uncertainty_label"].apply(
-        lambda label: "district join under review" if label != "High Confidence" else ""
-    )
-    df["latitude"] = None
-    df["longitude"] = None
+    df["nfhs_need_summary"] = df.apply(_nfhs_need_summary, axis=1)
+    df["facility_density_context"] = df.apply(_facility_density_summary, axis=1)
+    df["risk_flags"] = df.apply(_district_risk_flags, axis=1)
+    latitudes = pd.to_numeric(df["latitude"], errors="coerce")
+    longitudes = pd.to_numeric(df["longitude"], errors="coerce")
+    df["latitude"] = latitudes.mask(latitudes.eq(0))
+    df["longitude"] = longitudes.mask(longitudes.eq(0))
 
     threshold_score = confidence_threshold * 100
-    df = df[df["evidence_score"] >= threshold_score]
+    scored = df.copy()
+    df = scored[scored["evidence_score"] >= threshold_score]
     if df.empty:
-        return _fallback_districts(state_filter)
-    return _tag_source(df.sort_values(["priority_score", "need_score"], ascending=False).head(10), "live")
+        df = scored
+    return _tag_source(
+        df.sort_values(["priority_score", "need_score"], ascending=False)
+        .drop(columns=["district_key", "state_key"], errors="ignore")
+        .head(10),
+        "live",
+    )
 
 
 def _clean_facility_candidates(raw: pd.DataFrame) -> pd.DataFrame:
