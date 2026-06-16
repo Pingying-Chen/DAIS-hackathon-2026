@@ -208,13 +208,9 @@ Mission Control prevents the app from becoming a single opaque ranking.
 - Databricks App is running with the latest v5.4 cached entity-index configuration.
 - Native MLflow GenAI evaluation ran with two registered checks and 5/5 `yes` results for evidence grounding and operator actionability.
 
-## Judge-Relevant Version History
+## Latest Version
 
-| Version | What changed | Judge value |
-|---|---|---|
-| `v5.4` current | Added the cached facility entity-index table with source-row fingerprints and runtime fallback. | Faster Trust Desk resolution, safer handling of dataset updates, and a stable v5.4 demo path without adding Spark Declarative Pipelines or Vector Search as critical-path dependencies. |
-| `v5.3` validated baseline | Added deterministic facility ordering, lead-anchor citation gating, NFHS and density provenance, trust-review alignment, Lakebase readback, and native MLflow evaluation. | Proved the Mission Control workflow was evidence-grounded, persistent, and evaluation-backed before the v5.4 speed/stability optimization. |
-| Earlier MVP | Established the Track 3 Referral Copilot flow, map, shortlist action, and first Databricks App/Lakebase path. | Created the non-technical workflow that later versions hardened with evidence, uncertainty, and validation gates. |
+Care Convoy v5.4 is the current judge-facing build. It combines deterministic facility ordering, lead-anchor citation gating, NFHS and density provenance, trust-review alignment, Lakebase readback, native MLflow evaluation, and cached entity resolution in one stable referral workflow.
 
 ## Databricks Resources
 
