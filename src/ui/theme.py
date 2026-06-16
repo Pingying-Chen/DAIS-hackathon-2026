@@ -33,7 +33,9 @@ def _coerce_value(raw_value: str) -> object:
 
 
 def _load_theme_config() -> dict[str, object]:
-    path = Path("theme.config.toml")
+    path = Path(".streamlit/theme.config.toml")
+    if not path.exists():
+        path = Path("theme.config.toml")
     if not path.exists():
         return {}
 
@@ -114,4 +116,3 @@ def emit_css(theme_tokens: dict[str, object] | None = None) -> str:
 
 def inject_theme() -> None:
     st.markdown(f"<style>{emit_css()}\n{APP_CSS}</style>", unsafe_allow_html=True)
-
