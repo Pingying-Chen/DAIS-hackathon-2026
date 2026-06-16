@@ -31,6 +31,59 @@ Current deployed app URL:
 - [care-convoy](https://your-databricks-app-url)
 - Latest verified deployment: `<deployment-id>`, `RUNNING` and `ACTIVE` on 2026-06-15.
 
+## Pipeline Orchestration
+
+```mermaid
+flowchart LR
+    operator["Operations lead"] --> setup["Streamlit Mission Setup"]
+    setup --> run["run_agent()"]
+
+    subgraph databricks["Databricks resources"]
+        sql["SQL Warehouse"]
+        facilities["Virtue Foundation facility tables"]
+        model["Model Serving endpoint"]
+        lakebase["Lakebase shortlist store"]
+    end
+
+    subgraph tools["Tool layer"]
+        districts["Rank district priorities"]
+        anchors["Rank facility anchors"]
+        trust["Trust Desk v2: clean, resolve, verify, score"]
+        evidence["Evidence ledger with citations"]
+    end
+
+    subgraph board["Convoy Review Board v3"]
+        need["Need Scout"]
+        fit["Facility Scout"]
+        verifier["Trust Verifier"]
+        auditor["Evidence Auditor"]
+        strategist["Referral Strategist"]
+        supervisor["Supervisor verdict"]
+    end
+
+    run --> districts --> sql --> facilities
+    run --> anchors --> sql
+    anchors --> trust
+    trust --> evidence
+    districts --> need
+    anchors --> fit
+    trust --> verifier
+    evidence --> auditor
+    need --> strategist
+    fit --> strategist
+    verifier --> strategist
+    auditor --> strategist
+    strategist --> supervisor
+    run --> model
+    model --> summary["Mission brief, or deterministic fallback"]
+    supervisor --> views["Streamlit stage views"]
+    summary --> views
+    evidence --> views
+    views --> shortlist["Operator saves shortlist decision"]
+    shortlist --> lakebase
+    lakebase --> saved["Saved decisions reload in the app"]
+```
+
 ## Version History
 
 - `v2.0` - Added the Trust Desk v2 workflow with facility cleaning, entity resolution, public-website verification, and trust-supported referral planning. Reference commit: `538cf01`.
