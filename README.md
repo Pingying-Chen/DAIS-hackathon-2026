@@ -73,21 +73,21 @@ From here, the README is judge-facing: it maps the project to the hackathon trac
 
 ## Backend Pipeline
 
-In the live app, internal infrastructure details stay out of the operator home so the referral decision remains the main product surface. This README starts with the full flow at a high level, then expands each module separately so the pipeline is easier to read.
+In the live app, internal infrastructure details stay out of the operator home so the referral decision remains the main product surface. The backend is organized into four product modules:
 
 ```mermaid
 flowchart LR
-    user["Operations lead"] --> setup["Care need and place filters"]
-    setup --> data["1. Data readiness"]
-    data --> planning["2. Need and supply planning"]
-    planning --> trust["3. Trust and evidence review"]
-    trust --> control["4. Mission control"]
-    control --> action["Shortlist, verify first, or hold"]
-    action --> saved["Saved review note"]
-    control --> validation["Validation evidence"]
+    data["1. Data Readiness<br/>Profile, score, and resolve facility evidence"]
+    planning["2. Need And Supply<br/>Rank district need against local care capacity"]
+    trust["3. Trust And Evidence<br/>Review anchors, claims, citations, and weak signals"]
+    control["4. Mission Control And Persistence<br/>Convert gates into a saved operator action"]
+    data --> planning --> trust --> control
 ```
 
-### Module 1 - Data Readiness
+<details>
+<summary><strong>Module 1 - Data Readiness</strong></summary>
+
+This module turns the provided datasets into candidate-ready evidence while keeping source uncertainty visible.
 
 ```mermaid
 flowchart LR
@@ -108,7 +108,12 @@ flowchart LR
 - Appends only new scoring rows and new or reused entity-mapping rows; exact cache hits are skipped.
 - Stores search-ready entity text so the similarity lookup can move to Databricks Vector Search without changing the app contract.
 
-### Module 2 - Need And Supply
+</details>
+
+<details>
+<summary><strong>Module 2 - Need And Supply</strong></summary>
+
+This module chooses the district context for the mission before any facility is treated as the answer.
 
 ```mermaid
 flowchart LR
@@ -124,7 +129,12 @@ flowchart LR
 - Uses mission type to choose the relevant need and capability signals.
 - Outputs the priority district and uncertainty labels before selecting an anchor.
 
-### Module 3 - Trust And Evidence
+</details>
+
+<details>
+<summary><strong>Module 3 - Trust And Evidence</strong></summary>
+
+This module selects referral anchors and checks whether their claims are strong enough to act on.
 
 ```mermaid
 flowchart LR
@@ -142,7 +152,12 @@ flowchart LR
 - Aligns the Trust Desk review to the selected lead facility, not an unrelated duplicate.
 - Emits citation rows for facility claims and provenance rows for NFHS and density claims.
 
-### Module 4 - Mission Control And Persistence
+</details>
+
+<details>
+<summary><strong>Module 4 - Mission Control And Persistence</strong></summary>
+
+This module turns evidence strength into an operator action and persists the review trail.
 
 ```mermaid
 flowchart LR
@@ -157,6 +172,8 @@ flowchart LR
 - Runs Need Scout, Supply Mapper, Facility Scout, Trust Verifier, Evidence Auditor, Mission Strategist, and Supervisor.
 - Converts the weakest required gate into the operator-facing action: shortlist, verify first, or hold.
 - Saves the follow-up status, review note, and gate trace to Lakebase so the app demonstrates persistent action.
+
+</details>
 
 ## Input Datasets
 
@@ -198,8 +215,8 @@ The backend is designed as a staged evidence pipeline rather than a single ranki
 
 ## Acknowledgements
 
-Care Convoy was built during the hackathon period with original application code. See `AGENTS.md` for local development workflow and agent/skill reference details.
+Care Convoy was built during the hackathon period with original application code and submission-focused assets.
 
 ## License
 
-Care Convoy is released under the MIT License. See [LICENSE](/Users/pyc/Code/databricks/hackathon/DAIS-hackathon-2026/LICENSE) for details.
+Care Convoy is released under the MIT License. See [LICENSE](LICENSE) for details.
