@@ -79,7 +79,7 @@ From here, the README is judge-facing: it maps the project to the hackathon trac
 - **Keep the decision durable:** save the mission packet, gate trace, facility anchor, confidence, decision, and review note to Lakebase.
 - **Validate the workflow:** use MLflow evaluation checks for evidence grounding and operator actionability.
 
-## Optimized Pipeline View
+## Backend Pipeline
 
 ```mermaid
 flowchart LR
