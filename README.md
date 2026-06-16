@@ -186,7 +186,7 @@ Care Convoy uses the provided Virtue Foundation data as the primary product sour
 | `india_post_pincode_directory` | Provided | District and state reconciliation for facility-density context. | Density provenance rows and district supply warnings. |
 | `care_convoy_facility_scoring` | Derived | Append-only deterministic score features, candidate seed score, evidence counts, trust proxies, and source-row fingerprints. | Faster candidate ordering and scaled facility-fit scores. |
 | `care_convoy_facility_entity_index` | Derived | Append-only facility identity mapping, duplicate flags, source-row fingerprints, and search-ready text. | Faster duplicate review, stale-cache fallback, and facility trust alignment. |
-| `care_convoy_eval_v5_3` | Derived | Validation-only evaluation rows for evidence grounding and operator actionability. | MLflow evaluation report; not used for recommendations. |
+| `care_convoy_eval_v5_3` | Derived | Validation-only evaluation rows for evidence grounding and operator actionability. | [MLflow evaluation report](docs/evaluation/evaluation_report_v5_3.md); not used for recommendations. |
 
 ## Backend Decision Design
 
