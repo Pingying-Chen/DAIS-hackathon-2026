@@ -1,5 +1,7 @@
 # Care Convoy
 
+**Author:** Pingying Chen, Zihang Liang
+
 Care Convoy is a referral planning tool for India that helps health teams find where specialty care is most needed, which facility to review first, and what evidence to verify before action.
 
 Instead of presenting a single opaque score, Care Convoy produces a reviewable referral plan with cited evidence, uncertainty labels, duplicate and website trust checks, and a clear next action: shortlist, verify first, or hold.
@@ -10,13 +12,6 @@ The current app keeps the operator-first referral workflow and improves usabilit
 
 **Hackathon note:** Care Convoy was built for the Databricks Data for Good Hackathon using the provided Virtue Foundation facility dataset, NFHS district indicators, and India pincode directory.
 
-- **Author:** Pingying Chen
-- **Co-author:** Zihang Liang
-
-## Fast Read
-
-From here, the README is judge-facing: it maps the project to the hackathon track, demo path, evidence model, and Databricks resources.
-
 **Track 3: Referral Copilot for the Virtue Foundation Data for Good Hackathon**
 
 | Judging criterion | What Care Convoy proves | Where to look in the demo |
@@ -26,36 +21,9 @@ From here, the README is judge-facing: it maps the project to the hackathon trac
 | Technical execution | Runs as a Databricks App using Unity Catalog, SQL Warehouse, joined readiness tables, append-only scoring and entity-mapping tables, backend evidence caches, Lakebase, Model Serving hooks, MLflow evaluation, Streamlit, pandas, Plotly, and PyDeck. | Product Introduction, Backend Pipeline, Databricks Resources |
 | Ambition | The app does not stop at a map or a list. It uses seven decision gates to decide whether to shortlist, verify first, or hold. | Decision gates |
 
-## Current Version Notes
-
-The current build includes the v8 and v9 hardening passes.
-
-| Version | What changed | Why it matters |
-|---|---|---|
-| v8 | Tightened the operator UI for a 13-inch MacBook viewport: larger readable type, filters moved into the planner before the map, less first-glance clutter, shorter score text, and clearer critical-bar emphasis. | The first screen now supports a live demo without forcing judges to parse dense dashboard copy. |
-| v9 | Added app-ready joined facility and district tables, broader live-data fallback before any demo sample fallback, cached web-evidence table hooks, and Lakebase agent-feedback persistence. | The app can call prepared Databricks data directly, avoid slow runtime joins/scrapes during the demo, and prove durable state beyond browser session memory. |
-
 ## Demo Media
 
-<table>
-  <tr>
-    <td width="58%">
-      <img src="docs/assets/care-convoy-demo.jpg" alt="Care Convoy demo showing the Maharashtra referral map and mission packet" width="100%">
-    </td>
-    <td width="42%">
-      <h3>3-minute video placeholder</h3>
-      <p><strong>Status:</strong> add the final Devpost, YouTube, or Loom link here before submission.</p>
-      <ul>
-        <li>0:00 - name Track 3 Referral Copilot.</li>
-        <li>0:20 - show the recommended next move.</li>
-        <li>1:10 - open Why This Place for the weakest gate.</li>
-        <li>1:45 - open Evidence Details for plain-language source notes and uncertainty.</li>
-        <li>2:20 - save a review note for the follow-up work.</li>
-        <li>2:45 - open Product Introduction for the product story and usability summary.</li>
-      </ul>
-    </td>
-  </tr>
-</table>
+<img src="docs/assets/care-convoy-demo.jpg" alt="Care Convoy demo showing the Maharashtra referral map and mission packet" width="100%">
 
 ## One Decision, End To End
 
