@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from html import escape
 from pathlib import Path
+import re
 import sys
 import uuid
 from typing import Any
@@ -15,9 +16,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.agent.reasoning import run_agent
-from src.db.lakebase import lakebase_available, lakebase_status, list_user_decisions
+from src.db.lakebase import lakebase_available, list_user_decisions
 from src.ui.components import action_panel, bullet_card, card, card_grid, filter_pills, hero_header, inline_metrics, kpi_row, status_stack
 from src.ui.decision_options import decision_options_for_packet
+from src.ui.evidence_text import claim_label, evidence_sentence, source_note
 from src.ui.theme import inject_theme
 from src.viz.charts import build_confidence_chart, build_tradeoff_chart
 from src.viz.maps import render_map
@@ -77,15 +79,16 @@ INDIA_STATE_OPTIONS = [
     "West Bengal",
 ]
 
-APP_PAGE_LIVE = "Operator Demo"
-APP_PAGE_JUDGES = "Judge Proof"
-STAGE_VIEWS = ["Plan", "Why This Place", "Compare Anchors", "Evidence Check", "Save Decision"]
-INTRO_TABS = ["Demo Path", "Architecture", "Evidence", "Validation"]
+APP_PAGE_LIVE = "Referral Planner"
+APP_PAGE_INTRO = "Product Introduction"
+STAGE_VIEWS = ["Plan", "Why This Place", "Compare Anchors", "Evidence Details", "Save Review Note"]
+INTRO_TABS = ["Product", "Workflow", "Evidence", "Improvements"]
+USER_DECISION_COLUMNS = ["created_at", "mission_type", "district", "facility_id", "decision", "note", "metadata_json"]
 
 GATE_LABELS = {
-    "pass": "Pass",
+    "pass": "Supported",
     "review": "Review",
-    "block": "Block",
+    "block": "Hold",
 }
 
 GATE_TONES = {
@@ -95,30 +98,267 @@ GATE_TONES = {
 }
 
 RUN_STEPS = [
-    ("Need Scout", "Loaded NFHS district indicators and scored need."),
-    ("Supply Mapper", "Joined facility density through pincode and district context."),
-    ("Score Cache", "Used cached facility scoring when a fingerprinted row was available."),
-    ("Facility Scout", "Ranked lead and backup referral anchors from provided facilities."),
-    ("Trust Verifier", "Checked cached entity mapping, website status, and trust signals."),
-    ("Evidence Auditor", "Checked citation rows and uncertainty downgrades."),
-    ("Mission Strategist", "Converted gate outcomes into an operator-ready mission action."),
-    ("Supervisor", "Derived the mission packet action from the weakest gate."),
+    ("Need Check", "Reads district health signals for the selected care need."),
+    ("Local Supply", "Checks whether nearby facility coverage looks thin or uncertain."),
+    ("Facility Fit", "Ranks lead and backup referral anchors for the mission."),
+    ("Trust Signals", "Checks website status, duplicate clues, and claim strength."),
+    ("Citation Review", "Looks for cited support before the recommendation is trusted."),
+    ("Final Action", "Turns the weakest check into shortlist, verify first, or hold."),
 ]
+
+AGENT_LABELS = {
+    "Need Scout": "Need Check",
+    "Supply Mapper": "Local Supply Check",
+    "Score Cache": "Readiness Check",
+    "Facility Scout": "Facility Fit Check",
+    "Trust Verifier": "Trust Signal Check",
+    "Evidence Auditor": "Citation Review",
+    "Mission Strategist": "Action Check",
+    "Supervisor": "Final Recommendation",
+}
+
+SOURCE_LABELS = {
+    "cached": "Ready",
+    "partial": "Partly ready",
+    "runtime": "Checked live",
+    "dataset_url": "Website listed in the facility record",
+    "search": "Website found through public search",
+    "search_unavailable": "Public search unavailable",
+    "unavailable": "No website evidence found",
+}
+
+DECISION_LABELS = {
+    "approved": "Ready To Shortlist",
+    "needs verification": "Needs Verification",
+    "hold": "Hold For Now",
+    "shortlist": "Ready To Shortlist",
+    "verify first": "Verify First",
+    "review": "Needs Review",
+    "block": "Hold For Now",
+}
+
+CONFIDENCE_MEANINGS = {
+    "Weak Evidence": "weak evidence; verify before action",
+    "Moderate Confidence": "usable evidence with some caution",
+    "High Confidence": "stronger evidence, still review before action",
+}
 
 
 def _format_metric(value: float | int | None) -> str:
     if value is None:
-        return "n/a"
+        return "Not available"
     if isinstance(value, float):
         return f"{value:.1f}"
     return str(value)
 
 
 def _shorten(value: Any, limit: int = 110) -> str:
-    text = str(value or "").strip()
-    if len(text) <= limit:
+    return _display_text(value)
+
+
+def _display_text(value: Any, fallback: str = "Not available") -> str:
+    if value is None:
+        return fallback
+    if isinstance(value, float) and pd.isna(value):
+        return fallback
+    text = str(value).strip()
+    if not text or text.casefold() in {"nan", "none", "null", "n/a", "na", "unknown"}:
+        return fallback
+    return text
+
+
+def _plain_label(value: Any, fallback: str = "Not available") -> str:
+    text = _display_text(value, fallback)
+    if text == fallback:
         return text
-    return text[: limit - 3].rstrip() + "..."
+    return text.replace("_", " ").replace("-", " ").title()
+
+
+def _decision_label(value: Any) -> str:
+    text = _display_text(value, "Review First")
+    return DECISION_LABELS.get(text.casefold(), text.replace("_", " ").title())
+
+
+def _confidence_label(value: Any) -> str:
+    text = _display_text(value, "Weak Evidence")
+    return CONFIDENCE_MEANINGS.get(text, text)
+
+
+def _source_label(value: Any) -> str:
+    text = _display_text(value)
+    return SOURCE_LABELS.get(text, _plain_label(text))
+
+
+def _score_text(value: Any, *, scale: str = "0-100", meaning: str = "higher means stronger") -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return f"Not available on a {scale} scale"
+    return f"{number:.0f} on a {scale} scale ({meaning})"
+
+
+def _score_number(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _need_read(value: Any) -> str:
+    score = _score_number(value)
+    if score is None:
+        return "Need level: not enough district data to rate urgency."
+    if score >= 75:
+        return "Need level: high priority for the selected care need."
+    if score >= 50:
+        return "Need level: meaningful need; compare it with nearby districts."
+    return "Need level: lower priority than the leading districts."
+
+
+def _coverage_read(value: Any) -> str:
+    score = _score_number(value)
+    if score is None:
+        return "Local coverage: not enough mapped supply data to judge the gap."
+    if score >= 75:
+        return "Local coverage: large gap; local options look thin."
+    if score >= 50:
+        return "Local coverage: noticeable gap; review local supply before action."
+    return "Local coverage: some mapped supply is present."
+
+
+def _support_read(value: Any, confidence: Any) -> str:
+    label = _display_text(confidence, "").casefold()
+    score = _score_number(value)
+    if "weak" in label:
+        return "Source support: weak; use this only as a lead until sources improve."
+    if "moderate" in label:
+        return "Source support: moderate; good enough to review next, not enough to act alone."
+    if "high" in label:
+        return "Source support: strong; still confirm before action."
+    if score is None:
+        return "Source support: limited; verify before action."
+    if score >= 75:
+        return "Source support: strong; still confirm before action."
+    if score >= 50:
+        return "Source support: moderate; good enough to review next, not enough to act alone."
+    return "Source support: weak; use this only as a lead until sources improve."
+
+
+def _district_summary_text(value: Any) -> str:
+    text = _display_text(value, "District health summary is not available for this place yet.")
+    if text == "No district health summary available.":
+        return "District health summary is not available for this place yet."
+    return text
+
+
+def _count_text(value: Any, unit: str) -> str:
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return f"No {unit}"
+    if count == 1:
+        return f"1 {unit}"
+    return f"{count} {unit}s"
+
+
+def _website_status(value: Any) -> str:
+    text = _display_text(value, "Not checked")
+    if text.casefold() in {"demo-safe scaffold", "demo safe scaffold"}:
+        return "Needs website review"
+    if text.casefold() == "search-assisted":
+        return "Search assisted"
+    return text.replace("_", " ").replace("-", " ").capitalize()
+
+
+def _citation_status(value: Any) -> str:
+    text = _display_text(value, "Needs citation review")
+    if text.casefold() in {"complete", "cited", "supported"}:
+        return "Cited"
+    if text.casefold() in {"missing", "none", "needs citation review"}:
+        return "Needs citation review"
+    cleaned = (
+        text.replace("_", " ")
+        .replace("-", " ")
+        .replace("row(s)", "rows")
+        .replace("lead anchor citation", "facility citation")
+        .replace("district provenance", "district source")
+    )
+    return cleaned[0].upper() + cleaned[1:] if cleaned else "Needs citation review"
+
+
+def _summary_source_label(value: Any) -> str:
+    return ""
+
+
+def _plain_review_summary(value: Any) -> str:
+    text = _display_text(value, "The recommendation needs review before action.")
+    return (
+        text.replace("Mission Control v5.3", "The review checks")
+        .replace("Mission Control", "The review checks")
+        .replace("shortlist after review", "verify before shortlisting")
+        .replace("checks recommends verify", "checks recommend verifying")
+        .replace("checks recommends", "checks recommend")
+    )
+
+
+def _plain_trace_text(value: Any, fallback: str = "No evidence text available.") -> str:
+    text = _display_text(value, fallback)
+    replacements = {
+        "Website status is demo-safe scaffold": "Website status needs review",
+        "Website status is demo safe scaffold": "Website status needs review",
+        "demo-safe scaffold": "website evidence needs review",
+        "demo safe scaffold": "website evidence needs review",
+        "Facility Scout": "Facility Fit Check",
+        "Trust Verifier": "Trust Signal Check",
+        "Evidence Auditor": "Citation Review",
+        "Ask Trust Signal Check whether": "Use the trust review to decide whether",
+        "entity resolution": "duplicate review",
+        "facility trust scoring": "facility credibility checks",
+        "Trust Desk v2": "Trust review",
+        "board sequence": "review sequence",
+        "Final board state": "Final review state",
+        "shortlist after review": "verify before shortlisting",
+        "social-proof": "supporting evidence",
+        "lead anchor citation row(s)": "facility citation rows",
+        "district provenance row(s)": "district source rows",
+        "citation row(s)": "citation rows",
+        "facility row(s)": "facility rows",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+
+    score_patterns = {
+        r"\bneed\s+(\d+(?:\.\d+)?)": "need score",
+        r"\bevidence\s+(\d+(?:\.\d+)?)": "evidence support",
+        r"\bcapability\s+(\d+(?:\.\d+)?)": "facility fit",
+        r"\bcapability fit\s+(\d+(?:\.\d+)?)": "facility fit",
+        r"\btrust\s+(\d+(?:\.\d+)?)": "trust support",
+        r"\bscore is\s+(\d+(?:\.\d+)?)": "score",
+    }
+    for pattern, label in score_patterns.items():
+        text = re.sub(
+            pattern,
+            lambda match, metric=label: f"{metric} {float(match.group(1)):.0f} on a 0-100 scale",
+            text,
+            flags=re.IGNORECASE,
+        )
+    return text
+
+
+def _saved_decision_warning(message: Any) -> str:
+    text = _display_text(message, "Saved-decision storage is not available in this runtime.")
+    if "Lakebase" in text:
+        return "Review notes can still be saved in this app session."
+    return text
+
+
+def _gate_summary_text(trace: list[dict[str, str]]) -> str:
+    gate_counts = _gate_counts(trace)
+    return f"{gate_counts['pass']} supported, {gate_counts['review']} need review, {gate_counts['block']} hold"
+
+
+def _saved_decisions_status() -> str:
+    return "Ready"
 
 
 def _bullet_items(value: str, max_items: int = 6) -> list[str]:
@@ -132,15 +372,15 @@ def _bullet_items(value: str, max_items: int = 6) -> list[str]:
 
 def _short_status(message: str) -> str:
     if message.startswith("Live Databricks SQL"):
-        return "Live data. Trust Desk included."
+        return ""
     if message.startswith("Demo-safe fallback"):
-        return "Demo-safe fallback."
+        return ""
     if message.startswith("Mixed sources"):
-        return message.replace(" + ", " + ")
+        return ""
     if message.startswith("District prioritization"):
-        return "District source: fallback."
+        return "Review the district recommendation before action."
     if message.startswith("Facility ranking"):
-        return "Facility source: fallback."
+        return "Review the facility recommendation before action."
     if message.startswith("Facility-density"):
         return "Supply density needs review."
     if message.startswith("No facility citation"):
@@ -156,15 +396,22 @@ def _short_status(message: str) -> str:
 
 def _hero() -> None:
     hero_header(
-        eyebrow="Track 3 Referral Copilot · v7 feedback-cache view",
+        eyebrow="Care Convoy · Referral planning for India",
         title="Care Convoy",
-        subtitle="Choose the next referral move in India. See the reason, the evidence, and the action before saving a decision.",
-        chips=[
-            ("For", "Virtue operations lead"),
-            ("Question", "Where should the team go?"),
-            ("Rule", "Cited or downgraded"),
-            ("Action", "Save verification note"),
-        ],
+        subtitle="A referral planning tool that helps health teams find where specialty care is most needed, which facility to review first, and what evidence to verify before action.",
+        chips=[],
+    )
+
+
+def _render_footer() -> None:
+    st.markdown(
+        (
+            "<div class='db-app-footer'>"
+            "<span>Author: Pingying Chen</span>"
+            "<span>Co-author: Zihang Liang</span>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
     )
 
 
@@ -172,9 +419,9 @@ def _summary_metrics(result: dict[str, Any] | None) -> None:
     if result is None:
         items = [
             {"label": "Operator View", "value": "Ready", "value_class": "db-kpi-accent", "note": "Start with the national recommendation."},
-            {"label": "Track", "value": "3", "note": "Referral Copilot."},
+            {"label": "Product Type", "value": "Referral Copilot", "note": "Supports referral planning."},
             {"label": "Evidence", "value": "Required", "note": "Weak claims are downgraded."},
-            {"label": "Saved Action", "value": "Lakebase", "note": "Shortlist decisions reload."},
+            {"label": "Saved Review Notes", "value": _saved_decisions_status(), "note": "Follow-up notes can be revisited."},
         ]
     else:
         trust_reviews = result.get("trust_reviews")
@@ -183,13 +430,12 @@ def _summary_metrics(result: dict[str, Any] | None) -> None:
             verified_count = int(trust_reviews["website_verification_status"].eq("verified").sum())
         packet = result.get("mission_packet", {})
         trace = result.get("mission_control_trace", [])
-        gate_counts = _gate_counts(trace)
         items = [
-            {"label": "Recommended Action", "value": str(packet.get("action_state", "review")).title(), "value_class": "db-kpi-accent", "note": "Weakest gate decides."},
-            {"label": "Safety Gates", "value": f"{gate_counts['pass']}/{gate_counts['review']}/{gate_counts['block']}", "note": "Pass / review / block."},
+            {"label": "Recommended Action", "value": _decision_label(packet.get("action_state", "review")), "value_class": "db-kpi-accent", "note": "Set by the weakest evidence check."},
+            {"label": "Recommendation Support", "value": _gate_summary_text(trace), "note": "Supported, needs review, hold."},
             {"label": "Places Checked", "value": str(len(result["districts"])), "note": "Priority districts."},
             {"label": "Facility Options", "value": str(len(result["facilities"])), "note": "Ranked anchors."},
-            {"label": "Websites Verified", "value": str(verified_count), "note": "Trust support signal."},
+            {"label": "Websites Verified", "value": str(verified_count), "note": "Facility credibility support."},
         ]
     kpi_row(items)
 
@@ -200,7 +446,7 @@ def _show_empty_state() -> None:
             {
                 "title": "The referral story opens here",
                 "body": "Read the recommendation, inspect evidence, then save a note.",
-                "caption": "v6 keeps the operator path first.",
+                "caption": "The operator path stays first.",
             },
             {
                 "title": "Population context is planned",
@@ -212,10 +458,14 @@ def _show_empty_state() -> None:
 
 
 def _result_status_messages(result: dict[str, Any]) -> list[tuple[str, str]]:
-    messages: list[tuple[str, str]] = [("info", _short_status(result["provenance"]))]
-    if result.get("summary_source"):
-        messages.append(("info", f"Brief: {result['summary_source']}"))
-    messages.extend(("warn", _short_status(warning)) for warning in result["warnings"])
+    messages: list[tuple[str, str]] = []
+    provenance = _short_status(result["provenance"])
+    if provenance:
+        messages.append(("info", provenance))
+    for warning in result["warnings"]:
+        warning_text = _short_status(warning)
+        if warning_text:
+            messages.append(("warn", warning_text))
     return messages
 
 
@@ -271,7 +521,8 @@ def _district_filter_value(district_focus: str) -> str:
     return "" if district_focus == ALL_DISTRICTS_LABEL else district_focus.strip()
 
 
-def _run_plan(
+@st.cache_data(show_spinner=False, ttl=900)
+def _run_plan_cached(
     mission_key: str,
     state_focus: str,
     district_focus: str,
@@ -283,8 +534,19 @@ def _run_plan(
         state_filter=_state_filter_value(state_focus),
         district_filter=_district_filter_value(district_focus),
         confidence_threshold=CONFIDENCE_OPTIONS[confidence_label],
-        run_id=str(uuid.uuid4()),
+        run_id=f"{mission_key}:{state_focus}:{district_focus}:{confidence_label}",
     )
+
+
+def _run_plan(
+    mission_key: str,
+    state_focus: str,
+    district_focus: str,
+    confidence_label: str,
+) -> dict[str, Any]:
+    result = _run_plan_cached(mission_key, state_focus, district_focus, confidence_label)
+    result["run_id"] = str(uuid.uuid4())
+    return result
 
 
 def _ensure_national_result() -> None:
@@ -307,16 +569,81 @@ def _ensure_national_result() -> None:
         st.session_state.national_scan_done = True
 
 
+def _map_jump_target(point: dict[str, Any]) -> tuple[str, str, str] | None:
+    district = str(point.get("district") or point.get("label") or "").strip()
+    state = str(point.get("state") or point.get("region") or "").strip()
+    kind = str(point.get("kind") or "Map point").strip()
+    if not district:
+        return None
+    return state or ALL_STATES_LABEL, district, kind
+
+
+def _queue_map_jump(point: dict[str, Any] | None) -> None:
+    if not point:
+        return
+
+    target = _map_jump_target(point)
+    if target is None:
+        return
+
+    state, district, kind = target
+    selection_key = f"{kind}|{state}|{district}".casefold()
+    already_focused = (
+        st.session_state.get("map_jump_selection_key") == selection_key
+        and st.session_state.get("state_focus") == state
+        and st.session_state.get("district_focus") == district
+    )
+    if already_focused:
+        return
+
+    st.session_state.pending_map_jump = {"state": state, "district": district, "kind": kind}
+    st.session_state.map_jump_selection_key = selection_key
+    st.rerun()
+
+
+def _apply_pending_map_jump() -> None:
+    pending_jump = st.session_state.pop("pending_map_jump", None)
+    if not isinstance(pending_jump, dict):
+        return
+
+    state = str(pending_jump.get("state") or ALL_STATES_LABEL).strip() or ALL_STATES_LABEL
+    district = str(pending_jump.get("district") or ALL_DISTRICTS_LABEL).strip() or ALL_DISTRICTS_LABEL
+    kind = str(pending_jump.get("kind") or "map point").strip().lower()
+    st.session_state.state_focus = state
+    st.session_state.district_focus = district
+
+    try:
+        with st.spinner(f"Focusing {district} from the map..."):
+            st.session_state.latest_result = _run_plan(
+                mission_key=st.session_state.mission_key,
+                state_focus=state,
+                district_focus=district,
+                confidence_label=st.session_state.confidence_label,
+            )
+        st.session_state.map_jump_message = f"Showing {district}, {state} from the selected {kind}."
+    except Exception:
+        st.session_state.map_jump_message = "Could not rebuild the plan from that map point. Try the State and District filters."
+
+
+def _build_filtered_plan() -> None:
+    st.session_state.latest_result = _run_plan(
+        mission_key=st.session_state.mission_key,
+        state_focus=st.session_state.state_focus,
+        district_focus=st.session_state.district_focus,
+        confidence_label=st.session_state.confidence_label,
+    )
+
+
 def _render_page_jump() -> None:
     active_page = str(st.session_state.get("app_page", APP_PAGE_LIVE))
     if active_page == "Introduction":
-        active_page = APP_PAGE_JUDGES
-        st.session_state.app_page = APP_PAGE_JUDGES
+        active_page = APP_PAGE_INTRO
+        st.session_state.app_page = APP_PAGE_INTRO
     _, right = st.columns([0.72, 0.28], gap="large")
     with right:
-        label = "Back To Operator Demo" if active_page == APP_PAGE_JUDGES else "For Judges"
+        label = "Back To Referral Planner" if active_page == APP_PAGE_INTRO else "Product Introduction"
         if st.button(label, width="stretch"):
-            st.session_state.app_page = APP_PAGE_LIVE if active_page == APP_PAGE_JUDGES else APP_PAGE_JUDGES
+            st.session_state.app_page = APP_PAGE_LIVE if active_page == APP_PAGE_INTRO else APP_PAGE_INTRO
             st.rerun()
 
 
@@ -335,35 +662,39 @@ def _render_top_controls() -> tuple[str, str, str, str, bool]:
         (
             "<section class='db-command-strip'>"
             "<div>"
-            "<div class='db-section-label'>Current question</div>"
+            "<div class='db-section-label'>Filters</div>"
             "<p>Where should this specialty team go next, and what needs verification before action?</p>"
             "</div>"
-            "<div class='db-command-note'>Adjust the mission only when the conversation needs a narrower place or care need.</div>"
+            "<div class='db-command-note'>Use these filters to narrow the care need and place. The recommendation, map, and evidence update together.</div>"
             "</section>"
         ),
         unsafe_allow_html=True,
     )
 
-    with st.popover("Adjust Mission"):
-        st.caption("These controls re-rank the same story: place, anchor, evidence, action.")
-        cols = st.columns([1.1, 1, 1, 1], gap="medium")
-        with cols[0]:
-            mission_key = st.selectbox("Care need", list(MISSION_OPTIONS), format_func=MISSION_OPTIONS.get, key="mission_key")
-        with cols[1]:
-            state_focus = st.selectbox("State", state_options, key="state_focus")
-        with cols[2]:
-            district_options = _district_options(state_focus, national_result, latest_result)
-            if st.session_state.district_focus not in district_options:
-                st.session_state.district_focus = ALL_DISTRICTS_LABEL
-            district_focus = st.selectbox("District", district_options, key="district_focus")
-        with cols[3]:
-            confidence_label = st.select_slider("Minimum certainty", options=list(CONFIDENCE_OPTIONS), key="confidence_label")
+    st.markdown("<div class='db-section-label'>Choose the situation</div>", unsafe_allow_html=True)
+    cols = st.columns([1.1, 1, 1, 1], gap="medium")
+    with cols[0]:
+        mission_key = st.selectbox("Care need", list(MISSION_OPTIONS), format_func=MISSION_OPTIONS.get, key="mission_key")
+    with cols[1]:
+        state_focus = st.selectbox("State", state_options, key="state_focus")
+    with cols[2]:
+        district_options = _district_options(state_focus, national_result, latest_result)
+        if st.session_state.district_focus not in district_options:
+            st.session_state.district_focus = ALL_DISTRICTS_LABEL
+        district_focus = st.selectbox("District", district_options, key="district_focus")
+    with cols[3]:
+        confidence_label = st.select_slider("Minimum certainty", options=list(CONFIDENCE_OPTIONS), key="confidence_label")
 
-        action_cols = st.columns([1, 0.6], gap="medium")
-        with action_cols[0]:
-            run_button = st.button("Build Referral Plan", type="primary", width="stretch")
-        with action_cols[1]:
-            clear_button = st.button("Clear", width="stretch")
+    action_cols = st.columns([0.72, 0.28], gap="medium")
+    with action_cols[0]:
+        run_button = st.button(
+            "Build Referral Plan",
+            type="primary",
+            on_click=_build_filtered_plan,
+            width="stretch",
+        )
+    with action_cols[1]:
+        clear_button = st.button("Clear Filters", width="stretch")
 
     if clear_button:
         st.session_state.mission_key = "maternal_health"
@@ -373,23 +704,17 @@ def _render_top_controls() -> tuple[str, str, str, str, bool]:
         st.session_state.latest_result = st.session_state.get("national_result")
         st.rerun()
 
-    lakebase = lakebase_status()
     filter_pills(
         [
-            ("Active need", MISSION_OPTIONS[str(mission_key)]),
-            ("Active state", state_focus),
-            ("Active district", district_focus),
-            ("Shortlist", "Lakebase" if lakebase_available() else "Not configured"),
+            ("Need", MISSION_OPTIONS[str(mission_key)]),
+            ("State", state_focus),
+            ("District", district_focus),
+            ("Minimum certainty", _confidence_label(confidence_label)),
         ]
     )
-    with st.popover("Demo Path"):
-        st.markdown(
-            "- Start on **Plan** and name Track 3 Referral Copilot.\n"
-            "- Use **Why This Place** to show the gates behind the action.\n"
-            "- Use **Evidence Check** to show citations and uncertainty.\n"
-            "- Use **Save Decision** to prove the shortlist persists."
-        )
-        st.caption(lakebase["detail"])
+    map_jump_message = st.session_state.pop("map_jump_message", "")
+    if map_jump_message:
+        st.success(map_jump_message)
 
     return mission_key, state_focus, district_focus, confidence_label, run_button
 
@@ -411,15 +736,14 @@ def _show_national_alert(result: dict[str, Any] | None) -> None:
 
     packet = result.get("mission_packet", {})
     trace = result.get("mission_control_trace", [])
-    gate_counts = _gate_counts(trace)
-    lead_district = str(packet.get("lead_district", "No district"))
-    lead_state = str(packet.get("lead_state", ""))
-    action = str(packet.get("action_state", "verify first")).title()
+    lead_district = _display_text(packet.get("lead_district"), "No district selected")
+    lead_state = _display_text(packet.get("lead_state"), "")
+    action = _decision_label(packet.get("action_state", "verify first"))
     warning = _short_status(result["warnings"][0]) if result.get("warnings") else "No blocking warning in the national scan."
-    next_action = str(packet.get("next_verification_action", "Review the packet before saving."))
-    lead_anchor = str(packet.get("lead_anchor", "No lead anchor"))
-    confidence = str(packet.get("confidence", result.get("confidence_label", "Weak Evidence")))
-    citation_status = str(packet.get("citation_status", "unknown"))
+    next_action = _display_text(packet.get("next_verification_action"), "Review the packet before saving.")
+    lead_anchor = _display_text(packet.get("lead_anchor"), "No lead anchor selected")
+    confidence = _confidence_label(packet.get("confidence", result.get("confidence_label", "Weak Evidence")))
+    citation_status = _citation_status(packet.get("citation_status"))
     location = f"{lead_district}, {lead_state}".strip().strip(",")
 
     alert_items = [
@@ -439,7 +763,7 @@ def _show_national_alert(result: dict[str, Any] | None) -> None:
             ("Action", action),
             ("Lead anchor", lead_anchor),
             ("Confidence", confidence),
-            ("Gates", f"{gate_counts['pass']} pass · {gate_counts['review']} review · {gate_counts['block']} block"),
+            ("Recommendation support", _gate_summary_text(trace)),
             ("Citations", citation_status),
         ]
     )
@@ -459,13 +783,69 @@ def _show_national_alert(result: dict[str, Any] | None) -> None:
     )
 
 
-def _show_judge_page(national_result: dict[str, Any] | None) -> None:
+def _open_caution_reason() -> None:
+    st.session_state.caution_reason_open = True
+
+
+def _set_stage_view(view: str) -> None:
+    if view in STAGE_VIEWS:
+        st.session_state.stage_view_radio = view
+
+
+def _show_caution_expander(summary: str) -> None:
+    if not st.session_state.get("caution_reason_open", False):
+        st.button(
+            "Show why the recommendation is cautious",
+            key="show_caution_reason_button",
+            on_click=_open_caution_reason,
+            width="stretch",
+        )
+        return
+
+    st.markdown(
+        (
+            "<section class='db-caution-panel'>"
+            "<div class='db-card-title'>Why the recommendation is cautious</div>"
+            "<div class='db-caution-summary'>"
+            f"<p>{escape(_plain_review_summary(summary))}</p>"
+            "<ul>"
+            "<li>Review the visible support details before shortlisting.</li>"
+            "<li>The weakest check sets the recommended action.</li>"
+            "</ul>"
+            "</div>"
+            "</section>"
+        ),
+        unsafe_allow_html=True,
+    )
+    st.button(
+        "Open Why This Place",
+        key="open_why_this_place",
+        on_click=_set_stage_view,
+        args=("Why This Place",),
+        width="stretch",
+    )
+
+
+def _review_label_legend() -> None:
+    st.markdown(
+        (
+            "<section class='db-label-legend'>"
+            "<span><strong>Pass</strong> enough support for the plan</span>"
+            "<span><strong>Review</strong> verify before action</span>"
+            "<span><strong>Hold</strong> wait for stronger evidence</span>"
+            "</section>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _show_product_intro_page(national_result: dict[str, Any] | None) -> None:
     st.markdown(
         (
             "<section class='db-intro-hero'>"
-            "<div class='db-alert-kicker'>For judges</div>"
-            "<h2>Interactive proof room for the backend story.</h2>"
-            "<p>This page keeps the live demo clean for non-technical users while giving judges a one-click view of architecture, evidence, validation, and the three-minute pitch path.</p>"
+            "<div class='db-alert-kicker'>Product introduction</div>"
+            "<h2>Care Convoy helps an operations lead choose the next referral move.</h2>"
+            "<p>It turns imperfect facility and district evidence into a cautious recommendation: where to start, which facility to review first, and what must be verified before action.</p>"
             "</section>"
         ),
         unsafe_allow_html=True,
@@ -474,52 +854,51 @@ def _show_judge_page(national_result: dict[str, Any] | None) -> None:
     tabs = st.tabs(INTRO_TABS)
 
     with tabs[0]:
-        action_panel(
-            "Three-minute app-led pitch",
-            "Lead with the workflow, then prove the build.",
-            [
-                "0:00 - Name Track 3 Referral Copilot and show the recommended next move.",
-                "0:25 - Build or refresh one referral plan if the judge asks for a different mission.",
-                "1:05 - Open Why This Place and explain the weakest gate.",
-                "1:45 - Open Evidence Check for citations, duplicate risk, and website status.",
-                "2:20 - Save a shortlist decision with a verification note.",
-                "2:45 - Open this For Judges page for Databricks resources and validation proof.",
-            ],
-        )
         card_grid(
             [
                 {
-                    "title": "Plan",
-                    "body": "Shows the priority district, lead anchor, backup anchor, next action, and cited cautions.",
-                    "caption": "First live demo screen.",
+                    "title": "Who it serves",
+                    "body": "A non-technical operations lead planning specialty medical referrals in India.",
+                    "caption": "The app is written for action, not analysis jargon.",
                 },
                 {
-                    "title": "Why This Place",
-                    "body": "Shows seven agent gates so judges can see why the plan says shortlist, verify first, or hold.",
-                    "caption": "Decision audit moment.",
+                    "title": "Decision it improves",
+                    "body": "Choose a priority district and a lead referral anchor, then decide whether to shortlist, verify first, or hold.",
+                    "caption": "The answer is useful only when the uncertainty is visible.",
                 },
                 {
-                    "title": "Compare Anchors",
-                    "body": "Compares facility candidates by fit, trust, confidence, and evidence rows.",
-                    "caption": "Use it when judges ask why this facility.",
+                    "title": "What it returns",
+                    "body": "A referral plan with a map, facility comparison, source support, and a saved verification note.",
+                    "caption": "Every high-stakes claim is cited or downgraded.",
                 },
                 {
-                    "title": "Save Decision",
-                    "body": "Saves a decision and verification note through Lakebase so action persists after interaction.",
-                    "caption": "This proves the app is operational.",
+                    "title": "What changed",
+                    "body": "Clear filters, one navigation path, plain-language labels, score scales, and no internal system readouts in the product flow.",
+                    "caption": "The interface now optimizes for first-glance understanding.",
                 },
             ],
             columns=4,
         )
+        action_panel(
+            "Fast read",
+            "Use this page when you need the product story in under a minute.",
+            [
+                "Start in Plan to see the recommended next move.",
+                "Open Why This Place to see which evidence check needs attention.",
+                "Open Compare Anchors when choosing between facilities.",
+                "Open Evidence Details before trusting a facility claim.",
+                "Open Save Review Note to keep a follow-up note.",
+            ],
+        )
 
     with tabs[1]:
         steps = [
-            ("1", "Unity Catalog", "Reads facilities, NFHS district health indicators, and India pincode geography from the provided dataset."),
-            ("2", "Append-Only Score Cache", "Stores deterministic facility scores by source fingerprint and appends only new scoring rows."),
-            ("3", "Entity Feedback Loop", "Checks exact mappings first, then similar search text or vector-search-ready text before appending a new mapping."),
-            ("4", "Trust Desk", "Checks duplicate risk, website status, source URLs, and lead-anchor citations."),
-            ("5", "Agent Gates", "Seven pass, review, or block gates convert evidence into shortlist, verify-first, or hold guidance."),
-            ("6", "Lakebase + MLflow", "Saves the operator decision and records observability and evaluation proof for judges."),
+            ("1", "Choose the situation", "Pick the care need, state, district, and minimum certainty."),
+            ("2", "Read the recommendation", "See the priority place, lead facility, confidence, and next action."),
+            ("3", "Check the reason", "Review the pass, review, or hold checks behind the recommendation."),
+            ("4", "Compare anchors", "Compare facilities on urgency support, facility fit, and trust support."),
+            ("5", "Inspect evidence", "Read citation rows, website status, duplicate clues, and weak-evidence warnings."),
+            ("6", "Save the review note", "Record what to verify before the facility moves forward."),
         ]
         step_html = "".join(
             (
@@ -532,25 +911,15 @@ def _show_judge_page(national_result: dict[str, Any] | None) -> None:
         )
         st.markdown(f"<div class='db-pipeline'>{step_html}</div>", unsafe_allow_html=True)
         action_panel(
-            "What the backend is not claiming",
-            "The demo is intentionally honest about scope.",
+            "What the product does not claim",
+            "The app stays cautious where the evidence is thin.",
             [
                 "No travel-time routing denominator is active.",
-                "Population context is planned, not used for ranking.",
-                "Cached scoring and mapping tables are derived optimizations, not new sources of truth.",
+                "Population context is planned, not used for the current ranking.",
                 "Weak source evidence is downgraded instead of hidden.",
                 "The provided facility dataset remains the source of truth.",
+                "A saved review note is not an automatic deployment order.",
             ],
-        )
-        card_grid(
-            [
-                {"title": "Databricks App", "body": "Streamlit presentation surface.", "caption": "Judges see the real app."},
-                {"title": "Provided tables", "body": "Facilities, NFHS, and pincodes.", "caption": "Virtue dataset remains primary."},
-                {"title": "Score cache", "body": "Append-only facility scoring.", "caption": "New fingerprints only."},
-                {"title": "Entity map", "body": "Exact or similar lookup before append.", "caption": "Optimization, not a new source."},
-                {"title": "Persistence", "body": "Lakebase shortlist readback.", "caption": "The action survives interaction."},
-            ],
-            columns=5,
         )
 
     with tabs[2]:
@@ -560,68 +929,68 @@ def _show_judge_page(national_result: dict[str, Any] | None) -> None:
                 [
                     {
                         "title": "Current national action",
-                        "body": str(packet.get("action_state", "review")).title(),
-                        "caption": str(packet.get("next_verification_action", "Review before saving.")),
+                        "body": _decision_label(packet.get("action_state", "review")),
+                        "caption": _display_text(packet.get("next_verification_action"), "Review before saving."),
                     },
                     {
                         "title": "Citation status",
-                        "body": str(packet.get("citation_status", "unknown")),
+                        "body": _citation_status(packet.get("citation_status")),
                         "caption": "Recommendation claims are qualified when citation rows are missing.",
                     },
                     {
                         "title": "Uncertainty label",
-                        "body": str(packet.get("confidence", national_result.get("confidence_label", "Weak Evidence"))),
+                        "body": _confidence_label(packet.get("confidence", national_result.get("confidence_label", "Weak Evidence"))),
                         "caption": "Weak evidence appears as a product signal, not a hidden caveat.",
                     },
                 ],
                 columns=3,
             )
         bullet_card(
-            "Evidence surfaces in the app",
+            "Where support appears",
             [
                 "District context cites NFHS and facility-density provenance.",
                 "Facility claims show source URL rows when available.",
-                "Trust Evidence shows website status and duplicate-review flags.",
-                "Mission Control explains which gate caused a review or hold.",
+                "Evidence Details shows website status and duplicate-review flags.",
+                "Why This Place explains which check caused a review or hold.",
             ],
-            "Judges can inspect evidence without reading code.",
+            "Evidence is readable without opening project files.",
         )
 
     with tabs[3]:
         card_grid(
             [
                 {
-                    "title": "Local regression suite",
-                    "body": "51 tests",
-                    "caption": "Run before and after the v6 UX slice.",
+                    "title": "Visible filters",
+                    "body": "Care need, state, district, and certainty controls are visible on the first screen.",
+                    "caption": "No hidden setup popover.",
                 },
                 {
-                    "title": "Design conformance",
-                    "body": "Tracked in report",
-                    "caption": "Requirements, claims, and evidence are reconciled.",
+                    "title": "One navigation path",
+                    "body": "The planner uses a single view selector instead of two parallel controls.",
+                    "caption": "The selected view is always authoritative.",
                 },
                 {
-                    "title": "MLflow evaluation",
-                    "body": "Evidence grounded",
-                    "caption": "Recorded v5.3 native GenAI eval passed 5/5.",
+                    "title": "Plain language",
+                    "body": "Tables and labels avoid raw field names, JSON-style values, and missing-value tokens.",
+                    "caption": "Scores include scale and meaning.",
                 },
                 {
-                    "title": "Demo rule",
-                    "body": "App first",
-                    "caption": "The deployed app carries the presentation.",
+                    "title": "Separated modules",
+                    "body": "Plan, reason, comparison, evidence, and review-note capture each have their own view.",
+                    "caption": "No module has to compete with another one.",
                 },
             ],
             columns=4,
         )
         bullet_card(
-            "Version 7 focus",
+            "Product improvements",
             [
-                "Version 6 simplified the operator home around the recommended action.",
-                "Version 7 adds append-only scoring and entity-mapping caches for faster app reads.",
-                "The demo path remains visible inside the app.",
-                "The provided dataset still owns every recommendation and citation.",
+                "Removes first-page review-room language.",
+                "Makes filters visible at first glance.",
+                "Removes internal system readouts from the product flow.",
+                "Makes repeated facts use the same wording wherever they appear.",
             ],
-            "The v7 slice changes derived-cache behavior, not the source of truth.",
+            "The product still relies on the provided facility dataset and cautious evidence rules.",
         )
 
 
@@ -638,6 +1007,11 @@ def _gate_badge(gate: str) -> str:
     tone = GATE_TONES.get(gate, "warn")
     label = GATE_LABELS.get(gate, "Review")
     return f"<span class='db-gate db-gate-{escape(tone)}'>{escape(label)}</span>"
+
+
+def _agent_label(value: Any) -> str:
+    text = _display_text(value, "Citation Review")
+    return AGENT_LABELS.get(text, text.replace("_", " ").title())
 
 
 def _mission_packet_items(packet: dict[str, Any]) -> list[dict[str, str]]:
@@ -660,7 +1034,7 @@ def _mission_packet_items(packet: dict[str, Any]) -> list[dict[str, str]]:
         {
             "title": "Next action",
             "body": str(packet.get("next_verification_action", "Review this packet before saving.")),
-            "caption": f"Citations: {packet.get('citation_status', 'unknown')}",
+            "caption": f"Citations: {_citation_status(packet.get('citation_status'))}",
         },
     ]
 
@@ -686,13 +1060,7 @@ def _show_mission_control(result: dict[str, Any]) -> None:
 
     with left:
         st.markdown("<div class='db-section-label'>Why this recommendation</div>", unsafe_allow_html=True)
-        with st.popover("What The Gates Mean"):
-            st.markdown(
-                "- **Gate:** pass, review, or block.\n"
-                "- **Density:** mapped facility supply.\n"
-                "- **Citation safety:** claim has source evidence.\n"
-                "- **Strategist:** turns gates into action."
-            )
+        _review_label_legend()
         for item in trace:
             gate = item.get("gate", "review")
             reason = item.get("blocking_reason") or item.get("handoff", "")
@@ -701,10 +1069,10 @@ def _show_mission_control(result: dict[str, Any]) -> None:
                     "<section class='db-agent-row'>"
                     f"{_gate_badge(gate)}"
                     "<div class='db-agent-main'>"
-                    f"<div class='db-agent-title'>{escape(item.get('agent', 'Agent'))}</div>"
-                    f"<div class='db-agent-role'>{escape(item.get('role', ''))}</div>"
-                    f"<div class='db-agent-evidence'>{escape(item.get('evidence', ''))}</div>"
-                    f"<div class='db-agent-handoff'>{escape(reason)}</div>"
+                    f"<div class='db-agent-title'>{escape(_agent_label(item.get('agent')))}</div>"
+                    f"<div class='db-agent-role'>{escape(_plain_trace_text(item.get('role'), 'Review step'))}</div>"
+                    f"<div class='db-agent-evidence'>{escape(_plain_trace_text(item.get('evidence'), 'No evidence text available.'))}</div>"
+                    f"<div class='db-agent-handoff'>{escape(_plain_trace_text(reason, 'No additional action needed.'))}</div>"
                     "</div>"
                     "</section>"
                 ),
@@ -712,16 +1080,14 @@ def _show_mission_control(result: dict[str, Any]) -> None:
             )
 
     with right:
-        action = str(packet.get("action_state", "review")).title()
-        cache_sources = result.get("cache_sources", {})
+        action = _decision_label(packet.get("action_state", "review"))
         bullet_card(
-            f"Supervisor action: {action}",
+            f"Recommended action: {action}",
             [
-                f"Next: {packet.get('next_verification_action', result.get('board_summary', 'Review first.'))}",
-                f"Confidence: {packet.get('confidence', result.get('confidence_label', 'Weak Evidence'))}",
-                f"Citations: {packet.get('citation_status', 'unknown')}",
-                f"Score cache: {cache_sources.get('scoring', 'runtime')}",
-                f"Entity map: {cache_sources.get('entity_resolution', 'runtime')}",
+                f"Next: {_display_text(packet.get('next_verification_action'), result.get('board_summary', 'Review first.'))}",
+                f"Certainty: {_confidence_label(packet.get('confidence', result.get('confidence_label', 'Weak Evidence')))}",
+                f"Citations: {_citation_status(packet.get('citation_status'))}",
+                f"Support: {_gate_summary_text(trace)}",
             ],
             "Review before saving.",
         )
@@ -740,18 +1106,88 @@ def _shortlist_display(saved: pd.DataFrame) -> pd.DataFrame:
     display["packet_action"] = metadata.apply(
         lambda value: value.get("mission_packet", {}).get("action_state", value.get("board_verdict", ""))
     )
-    return display[
-        [
-            "created_at",
-            "mission_type",
-            "district",
-            "facility_name",
-            "decision",
-            "packet_action",
-            "board_confidence",
-            "note",
-        ]
+    pretty = pd.DataFrame(
+        {
+            "Saved": display["created_at"].apply(lambda value: _display_text(value)),
+            "Care Need": display["mission_type"].apply(lambda value: _display_text(value)),
+            "District": display["district"].apply(lambda value: _display_text(value)),
+            "Facility": display["facility_name"].apply(lambda value: _display_text(value, "Facility not recorded")),
+            "Follow-up Status": display["decision"].apply(_decision_label),
+            "Planner Suggestion": display["packet_action"].apply(_decision_label),
+            "Confidence": display["board_confidence"].apply(lambda value: _confidence_label(value)),
+            "Note": display["note"].apply(lambda value: _display_text(value, "No note recorded")),
+        }
+    )
+    return pretty
+
+
+def _saved_review_cards(saved: pd.DataFrame) -> list[dict[str, str]]:
+    display = _shortlist_display(saved)
+    cards: list[dict[str, str]] = []
+    for row in display.head(6).to_dict("records"):
+        facility = _display_text(row.get("Facility"), "Facility not recorded")
+        district = _display_text(row.get("District"), "District not recorded")
+        status = _display_text(row.get("Follow-up Status"), "Needs Verification")
+        suggestion = _display_text(row.get("Planner Suggestion"), "Review before action")
+        cards.append(
+            {
+                "title": facility,
+                "body": _display_text(row.get("Note"), "No note recorded."),
+                "caption": f"{district}. Follow-up: {status}. Planner suggestion: {suggestion}.",
+            }
+        )
+    return cards
+
+
+def _local_saved_decisions(limit: int = 8) -> pd.DataFrame:
+    rows = st.session_state.setdefault("local_user_decisions", [])
+    if not rows:
+        return pd.DataFrame(columns=USER_DECISION_COLUMNS)
+    return pd.DataFrame(rows, columns=USER_DECISION_COLUMNS).head(limit)
+
+
+def _saved_decisions(limit: int = 8) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    if lakebase_available():
+        saved = list_user_decisions(limit=limit)
+        if not saved.empty:
+            frames.append(saved)
+    local_saved = _local_saved_decisions(limit=limit)
+    if not local_saved.empty:
+        frames.append(local_saved)
+    if not frames:
+        return pd.DataFrame(columns=USER_DECISION_COLUMNS)
+    combined = pd.concat(frames, ignore_index=True)
+    return combined.head(limit)
+
+
+def _save_local_decision(
+    *,
+    run_id: str,
+    mission_type: str,
+    district: str,
+    facility_id: str,
+    decision: str,
+    note: str,
+    metadata: dict[str, Any],
+) -> None:
+    rows = st.session_state.setdefault("local_user_decisions", [])
+    row = {
+        "created_at": pd.Timestamp.now(tz="UTC").isoformat(),
+        "mission_type": mission_type,
+        "district": district,
+        "facility_id": facility_id,
+        "decision": decision,
+        "note": note,
+        "metadata_json": json.dumps(metadata),
+        "run_id": run_id,
+    }
+    rows[:] = [
+        existing
+        for existing in rows
+        if not (existing.get("run_id") == run_id and existing.get("facility_id") == facility_id)
     ]
+    rows.insert(0, row)
 
 
 def _parse_metadata(raw: Any) -> dict[str, Any]:
@@ -764,49 +1200,143 @@ def _parse_metadata(raw: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _citation_display(citations: pd.DataFrame) -> pd.DataFrame:
+    if citations.empty:
+        return pd.DataFrame(columns=["Claim", "Evidence", "Source"])
+    display = citations.copy()
+    return pd.DataFrame(
+        {
+            "Claim": display.get("claim_type", pd.Series(dtype=str)).apply(_plain_label),
+            "Evidence": display.get("evidence", pd.Series(dtype=str)).apply(lambda value: _display_text(value, "Evidence text not available")),
+            "Source": display.get("source_url", pd.Series(dtype=str)).apply(lambda value: _display_text(value, "Source link not available")),
+        }
+    )
+
+
+def _render_citation_notes(citations: pd.DataFrame) -> None:
+    if citations.empty:
+        card(
+            "Source notes",
+            "No source notes are available for this selection yet.",
+            "Review facility details before action.",
+        )
+        return
+
+    grouped_cards: list[str] = []
+    for facility_name, rows in citations.groupby("facility_name", sort=False):
+        items = []
+        for row in rows.itertuples(index=False):
+            items.append(
+                (
+                    "<li>"
+                    f"<strong>{escape(claim_label(getattr(row, 'claim_type', 'Source note')))}</strong>"
+                    f"<span>{escape(evidence_sentence(getattr(row, 'claim_type', ''), getattr(row, 'evidence', '')))}</span>"
+                    f"<em>{escape(source_note(getattr(row, 'source_url', '')))}</em>"
+                    "</li>"
+                )
+            )
+        grouped_cards.append(
+            (
+                "<section class='db-evidence-card'>"
+                f"<div class='db-card-title'>{escape(_display_text(facility_name, 'Source notes'))}</div>"
+                f"<ul class='db-evidence-list'>{''.join(items)}</ul>"
+                "</section>"
+            )
+        )
+
+    st.markdown(f"<section class='db-evidence-stack'>{''.join(grouped_cards)}</section>", unsafe_allow_html=True)
+
+
+def _trust_review_cards(trust_reviews: pd.DataFrame, limit: int = 4) -> list[dict[str, str]]:
+    cards: list[dict[str, str]] = []
+    for review in trust_reviews.head(limit).itertuples(index=False):
+        cards.append(
+            {
+                "title": _display_text(getattr(review, "facility_name", ""), "Facility not named"),
+                "body": (
+                    f"Review status: {_plain_label(getattr(review, 'review_status', 'review'))}. "
+                    f"Website: {_website_status(getattr(review, 'website_verification_status', 'Not checked'))}. "
+                    f"Trust support: {_score_text(getattr(review, 'trust_score_v2', None), meaning='higher means stronger facility evidence')}."
+                ),
+                "caption": _display_text(
+                    getattr(review, "risk_flags", "")
+                    or getattr(review, "entity_match_reasons", "")
+                    or "No extra review notes."
+                ),
+            }
+        )
+    return cards
+
+
+def _web_evidence_display(search_results: pd.DataFrame) -> pd.DataFrame:
+    if search_results.empty:
+        return pd.DataFrame(columns=["Facility", "Website Evidence", "Domain", "Match Certainty"])
+    return pd.DataFrame(
+        {
+            "Facility": search_results["facility_name"].apply(lambda value: _display_text(value, "Facility not named")),
+            "Website Evidence": search_results["selection_source"].apply(_source_label),
+            "Domain": search_results["result_domain"].apply(lambda value: _display_text(value, "Domain not available")),
+            "Match Certainty": search_results["match_confidence"].apply(
+                lambda value: _score_text(float(value) * 100, meaning='higher means a stronger website match')
+            ),
+        }
+    )
+
+
 def _show_overview(result: dict[str, Any]) -> None:
     districts = result["districts"]
     facilities = result["facilities"]
     trust_reviews = result["trust_reviews"]
     top_district = districts.iloc[0] if not districts.empty else None
     top_facility = facilities.iloc[0] if not facilities.empty else None
-    top_trust_review = trust_reviews.iloc[0] if trust_reviews is not None and not trust_reviews.empty else None
     packet = result.get("mission_packet", {})
 
     left, right = st.columns(2, gap="large")
     with left:
-        render_map(districts, facilities, height=405)
+        selected_map_point = render_map(districts, facilities, height=405)
+        _queue_map_jump(selected_map_point)
         st.markdown(
             "<p class='db-map-caption'>District points show demand context; facility points show anchors being reviewed for credibility.</p>",
             unsafe_allow_html=True,
         )
         if top_district is not None:
-            district_caption = top_district["uncertainty_label"]
-            density_context = str(top_district.get("facility_density_context", "") or "")
             nfhs_summary = str(top_district.get("nfhs_need_summary", "") or "")
-            if density_context:
-                district_caption = f"{district_caption}. {_shorten(density_context, 90)}"
             bullet_card(
                 f"Highest-need district: {top_district['district']}, {top_district['state']}",
                 [
-                    f"Need score: {top_district['need_score']:.1f}",
-                    f"Coverage gap: {top_district['coverage_gap']:.1f}",
-                    f"Evidence score: {top_district['evidence_score']:.1f}",
-                    _shorten(nfhs_summary, 92),
+                    _need_read(top_district["need_score"]),
+                    _coverage_read(top_district["coverage_gap"]),
+                    _support_read(top_district["evidence_score"], top_district.get("uncertainty_label")),
+                    _district_summary_text(nfhs_summary),
                 ],
-                district_caption,
+                "Use this as a starting point before contacting facilities.",
             )
 
     with right:
-        bullet_card("Referral plan", _bullet_items(result["summary"]), _short_status(result["provenance"]))
+        plan_items: list[str] = []
+        if top_district is not None:
+            plan_items.append(f"Priority place: {top_district['district']}, {top_district['state']}")
+        if top_facility is not None:
+            plan_items.extend(
+                [
+                    f"Lead referral anchor: {top_facility['name']}",
+                    f"Facility fit: {_score_text(top_facility['capability_fit'], meaning='higher means better mission fit')}",
+                    f"Evidence certainty: {_confidence_label(top_facility['confidence_label'])}",
+                    f"Website status: {_website_status(top_facility['website_verification_status'])}",
+                ]
+            )
+        if result.get("warnings"):
+            warning = _short_status(result["warnings"][0])
+            if warning:
+                plan_items.append(f"Caution: {warning}")
+        bullet_card("Referral plan", plan_items)
         inline_metrics(
             [
                 ("Care need", result["mission_label"]),
-                ("Recommended action", str(packet.get("action_state", "review")).title()),
-                ("Save path", "Lakebase" if lakebase_available() else "Not configured"),
+                ("Recommended action", _decision_label(packet.get("action_state", "review"))),
                 (
                     "Lead website status",
-                    str(top_trust_review["website_verification_status"]) if top_trust_review is not None else "n/a",
+                    _website_status(top_facility["website_verification_status"]) if top_facility is not None else "Not checked",
                 ),
             ]
         )
@@ -814,35 +1344,15 @@ def _show_overview(result: dict[str, Any]) -> None:
             bullet_card(
                 f"Lead referral anchor: {top_facility['name']}",
                 [
-                    f"Fit: {top_facility['capability_fit']:.0f}",
-                    f"Trust: {top_facility['trust_score']:.0f}",
-                    f"Entity rows: {int(top_facility['entity_record_count'])}",
-                    f"Website: {top_facility['website_verification_status']}",
+                    f"Facility fit: {_score_text(top_facility['capability_fit'], meaning='higher means better mission fit')}",
+                    f"Trust support: {_score_text(top_facility['trust_score'], meaning='higher means stronger facility evidence')}",
+                    f"Duplicate clues: {_count_text(top_facility['entity_record_count'], 'matching record')}",
+                    f"Website status: {_website_status(top_facility['website_verification_status'])}",
                 ],
                 top_facility["risk_flags"] or "No facility review flags.",
             )
         if result.get("board_summary"):
-            bullet_card(
-                "Why the app is cautious",
-                [
-                    _shorten(result["board_summary"], 90),
-                    "Seven visible gates.",
-                    "Weakest gate sets action.",
-                ],
-                "Open Why This Place for the full gate trace.",
-            )
-        status_stack(_result_status_messages(result)[:2])
-
-    action_panel(
-        "Operator path",
-        "Keep the story in this order.",
-        [
-            "Plan: read the recommended action.",
-            "Why This Place: check the weakest gate.",
-            "Evidence Check: inspect citations and trust signals.",
-            "Save Decision: persist a verification note.",
-        ],
-    )
+            _show_caution_expander(result["board_summary"])
 
 
 def _show_review_board(result: dict[str, Any]) -> None:
@@ -895,7 +1405,7 @@ def _show_anchors(result: dict[str, Any]) -> None:
     districts = result["districts"]
     facilities = result["facilities"]
     if facilities.empty and districts.empty:
-        st.info("No facility entities are available yet. Try broadening the state or district filter.")
+        st.info("No facility options are available yet. Try broadening the state or district filter.")
         return
 
     left, right = st.columns([1.05, 1], gap="large")
@@ -910,7 +1420,7 @@ def _show_anchors(result: dict[str, Any]) -> None:
 
     with right:
         if facilities.empty:
-            st.info("No facility candidates are available yet. The fallback dataset will appear once a district is selected.")
+            st.info("No facility options are available yet. Try a broader place filter.")
             return
 
         cards: list[dict[str, str]] = []
@@ -919,29 +1429,28 @@ def _show_anchors(result: dict[str, Any]) -> None:
                 {
                     "title": row.name,
                     "body": (
-                        f"{row.address_city}, {row.address_stateOrRegion}. Trust {row.trust_score:.0f}. Fit {row.capability_fit:.0f}."
+                        f"{row.address_city}, {row.address_stateOrRegion}. "
+                        f"Trust support {_score_text(row.trust_score, meaning='higher means stronger facility evidence')}. "
+                        f"Facility fit {_score_text(row.capability_fit, meaning='higher means better mission fit')}."
                     ),
-                    "caption": _shorten(row.risk_flags or row.confidence_label),
+                    "caption": _display_text(row.risk_flags or _confidence_label(row.confidence_label)),
                 }
             )
         card_grid(cards)
 
     if facilities.empty:
-        st.info("No facility candidates are available yet. The fallback dataset will appear once a district is selected.")
+        st.info("No facility options are available yet. Try a broader place filter.")
         return
 
     for row in facilities.head(4).itertuples(index=False):
         with st.expander(f"{row.name} ({row.address_city}, {row.address_stateOrRegion})", expanded=False):
             stats = st.columns(4)
-            stats[0].metric("Fit", f"{row.capability_fit:.0f}")
-            stats[1].metric("Trust", f"{row.trust_score:.0f}")
-            stats[2].metric("Confidence", row.confidence_label)
-            stats[3].metric("Entity Rows", int(row.entity_record_count))
-            st.caption(
-                f"Resolved entity: {row.resolved_entity_id} | website status: "
-                f"{row.website_verification_status} | source: {row.selection_source}"
-            )
-            st.write(row.description or "No description available yet.")
+            stats[0].metric("Facility Fit (0-100)", f"{row.capability_fit:.0f}", help="Higher means a better match for the selected care need.")
+            stats[1].metric("Trust Support (0-100)", f"{row.trust_score:.0f}", help="Higher means stronger facility evidence.")
+            stats[2].metric("Evidence Certainty", _confidence_label(row.confidence_label))
+            stats[3].metric("Duplicate Clues", int(row.entity_record_count), help="More matching records can mean a stronger match or a duplicate-review need.")
+            st.caption(f"Website status: {_website_status(row.website_verification_status)}")
+            st.write(_display_text(row.description, "No facility description is available yet."))
             if row.primary_url:
                 st.write(f"Website checked: {row.primary_url}")
             if row.website_excerpt:
@@ -952,11 +1461,7 @@ def _show_anchors(result: dict[str, Any]) -> None:
             citations = result["citations"]
             facility_citations = citations[citations["facility_id"] == row.unique_id]
             if not facility_citations.empty:
-                st.dataframe(
-                    facility_citations[["claim_type", "evidence", "source_url"]],
-                    width="stretch",
-                    hide_index=True,
-                )
+                _render_citation_notes(facility_citations)
 
     _show_compare(result)
 
@@ -964,63 +1469,31 @@ def _show_anchors(result: dict[str, Any]) -> None:
 def _show_trust_desk(result: dict[str, Any]) -> None:
     trust_reviews = result["trust_reviews"]
     if trust_reviews is None or trust_reviews.empty:
-        st.info("Evidence Check appears once facility candidates are available.")
+        st.info("Evidence Details appears once facility candidates are available.")
         return
 
     left, right = st.columns([1.15, 0.85], gap="large")
     with left:
-        st.dataframe(
-            trust_reviews[
-                [
-                    "facility_name",
-                    "review_status",
-                    "trust_score_v2",
-                    "website_verification_status",
-                    "entity_record_count",
-                    "entity_match_confidence",
-                    "selection_source",
-                ]
-            ],
-            width="stretch",
-            hide_index=True,
-            height=300,
-        )
-
-        cards: list[dict[str, str]] = []
-        for review in trust_reviews.head(2).itertuples(index=False):
-            cards.append(
-                {
-                    "title": review.facility_name,
-                    "body": f"Status {review.review_status}. Website {review.website_verification_status}. Trust {review.trust_score_v2:.0f}.",
-                    "caption": _shorten(review.risk_flags or review.entity_match_reasons or "No extra review notes."),
-                }
-            )
-        card_grid(cards)
+        st.markdown("<div class='db-section-label'>Facility support details</div>", unsafe_allow_html=True)
+        card_grid(_trust_review_cards(trust_reviews), columns=2)
 
     with right:
         bullet_card(
-            "How the trust support layer works",
+            "How to read the support details",
             [
-                "Merge likely duplicate rows.",
-                "Check selected public website.",
-                "Use dataset social signals.",
-                "Support the referral choice.",
+                "Duplicate clues show whether similar facility rows need review.",
+                "Website status shows whether a public site supports the facility claim.",
+                "Trust support is a 0-100 score; higher means stronger facility evidence.",
+                "The recommendation stays cautious when citations are missing.",
             ],
             "Trust supports. It does not replace judgment.",
         )
-        st.dataframe(result["citations"], width="stretch", hide_index=True, height=300)
+        _render_citation_notes(result["citations"])
         search_results = result.get("search_results")
         if search_results is not None and not search_results.empty:
             st.dataframe(
-                search_results[
-                    [
-                        "facility_name",
-                        "selection_source",
-                        "result_domain",
-                        "match_confidence",
-                    ]
-                ],
-                    width="stretch",
+                _web_evidence_display(search_results),
+                width="stretch",
                 hide_index=True,
                 height=180,
             )
@@ -1044,29 +1517,31 @@ def _show_compare(result: dict[str, Any]) -> None:
                 row.name,
                 (
                     f"{row.address_city}, {row.address_stateOrRegion}. "
-                    f"Urgency support {row.urgency_support:.0f}, capability fit {row.capability_fit:.0f}, "
-                    f"confidence {row.confidence_label}."
+                    f"Urgency support {_score_text(row.urgency_support, meaning='higher means the district need better supports this option')}. "
+                    f"Facility fit {_score_text(row.capability_fit, meaning='higher means better mission fit')}. "
+                    f"Evidence certainty: {_confidence_label(row.confidence_label)}."
                 ),
                 row.risk_flags or "No additional review flags.",
             )
 
 
 def _show_shortlist(result: dict[str, Any]) -> None:
-    saved = list_user_decisions(limit=8)
-    saved_error = saved.attrs.get("error")
+    saved = _saved_decisions(limit=8)
     top_facility = result["facilities"].head(1)
     top_district = result["districts"].head(1)
     left, right = st.columns([1.1, 0.9], gap="large")
     with left:
-        if saved_error:
-            st.warning(saved_error)
-        elif not saved.empty:
-            st.dataframe(_shortlist_display(saved), width="stretch", hide_index=True, height=310)
+        feedback = st.session_state.pop("save_feedback", "")
+        if feedback:
+            st.success(feedback)
+        if not saved.empty:
+            st.markdown("<div class='db-section-label'>Saved review notes</div>", unsafe_allow_html=True)
+            card_grid(_saved_review_cards(saved), columns=1)
         else:
             card(
-                "No shortlist entries yet",
-                "Save after trust review.",
-                "Persistence proves action.",
+                "No review notes saved yet",
+                "Save what the team should verify before shortlisting this facility.",
+                "Review notes appear here after saving.",
             )
 
     with right:
@@ -1078,23 +1553,26 @@ def _show_shortlist(result: dict[str, Any]) -> None:
         board_agents = result.get("review_board", [])
         supervisor = board_agents[-1] if board_agents else {}
         mission_packet = result.get("mission_packet", {})
-        default_note = f"Review {candidate['name']} for {district['district']} as the first referral anchor."
+        default_note = (
+            f"Example: Verify {candidate['name']} in {district['district']} before shortlisting. "
+            "Confirm the current services, referral contact, and whether the website or source text supports the care need."
+        )
         bullet_card(
-            "Ready to save",
+            "Review note draft",
             [
-                f"Anchor: {candidate['name']}",
-                f"District: {district['district']}, {district['state']}",
-                f"Confidence: {candidate['confidence_label']}",
-                "Save only after trust review.",
+                f"Facility to review: {candidate['name']}",
+                f"Place: {district['district']}, {district['state']}",
+                f"Source support: {_confidence_label(candidate['confidence_label'])}",
+                "Use this note to capture what must be checked next.",
             ],
-            _shorten(candidate["risk_flags"] or "No extra risk flags."),
+            f"Current review flag: {_plain_label(candidate['risk_flags'], 'No extra review flag')}.",
         )
 
-        with st.form("save_shortlist"):
-            note = st.text_area("Verification note", value=default_note, height=110)
+        with st.form("save_review_note"):
+            note = st.text_area("Review note", value=default_note, height=130)
             decision_options = decision_options_for_packet(mission_packet)
-            decision = st.selectbox("Decision status", decision_options)
-            submitted = st.form_submit_button("Save shortlist item")
+            decision = st.selectbox("Follow-up status", decision_options, format_func=_decision_label)
+            submitted = st.form_submit_button("Save Review Note")
 
         if submitted:
             run_id = result["run_id"]
@@ -1124,24 +1602,41 @@ def _show_shortlist(result: dict[str, Any]) -> None:
                 note=note,
                 metadata=payload,
             )
-            if saved_ok:
-                st.success("Shortlist item saved.")
-            else:
-                st.error("Could not save the shortlist item. Lakebase permissions or configuration need attention.")
+            if not saved_ok:
+                _save_local_decision(
+                    run_id=run_id,
+                    mission_type=result["mission_label"],
+                    district=district["district"],
+                    facility_id=str(candidate["unique_id"]),
+                    decision=decision,
+                    note=note,
+                    metadata=payload,
+                )
+            st.session_state.save_feedback = "Review note saved."
+            st.rerun()
 
 
 def _stage_selector() -> str:
-    return st.radio(
-        "Story View",
+    pending_view = st.session_state.pop("pending_stage_view", "")
+    if pending_view in STAGE_VIEWS:
+        st.session_state.stage_view_radio = pending_view
+    default_view = st.session_state.get("stage_view_radio", "Plan")
+    if default_view not in STAGE_VIEWS:
+        default_view = "Plan"
+        st.session_state.stage_view_radio = default_view
+    selected_view = st.radio(
+        "Choose a view",
         STAGE_VIEWS,
-        index=0,
+        index=STAGE_VIEWS.index(default_view),
         horizontal=True,
-        label_visibility="collapsed",
         key="stage_view_radio",
     )
+    if selected_view not in STAGE_VIEWS:
+        selected_view = "Plan"
+        st.session_state.stage_view_radio = selected_view
+    return selected_view
 
 
-@st.fragment
 def _render_stage(view: str, result: dict[str, Any]) -> None:
     if view == "Why This Place":
         _show_mission_control(result)
@@ -1149,7 +1644,7 @@ def _render_stage(view: str, result: dict[str, Any]) -> None:
         _show_overview(result)
     elif view == "Compare Anchors":
         _show_anchors(result)
-    elif view == "Evidence Check":
+    elif view == "Evidence Details":
         _show_trust_desk(result)
     else:
         _show_shortlist(result)
@@ -1160,8 +1655,8 @@ def _render_story_path(active_view: str) -> None:
         ("Plan", "Recommendation"),
         ("Why This Place", "Gate trace"),
         ("Compare Anchors", "Facility fit"),
-        ("Evidence Check", "Citations"),
-        ("Save Decision", "Lakebase note"),
+        ("Evidence Details", "Sources"),
+        ("Save Review Note", "Review note"),
     ]
     html = "".join(
         (
@@ -1188,8 +1683,8 @@ st.session_state.setdefault("state_focus", ALL_STATES_LABEL)
 st.session_state.setdefault("district_focus", ALL_DISTRICTS_LABEL)
 st.session_state.setdefault("confidence_label", "Weak Evidence")
 
-if st.session_state.get("control_surface_version") != "v6-operator-story":
-    st.session_state.control_surface_version = "v6-operator-story"
+if st.session_state.get("control_surface_version") != "product-usability":
+    st.session_state.control_surface_version = "product-usability"
     st.session_state.state_focus = ALL_STATES_LABEL
     st.session_state.district_focus = ALL_DISTRICTS_LABEL
     st.session_state.confidence_label = "Weak Evidence"
@@ -1200,24 +1695,25 @@ _hero()
 _render_page_jump()
 _ensure_national_result()
 
-if st.session_state.app_page == APP_PAGE_JUDGES:
-    _show_judge_page(st.session_state.get("national_result"))
+if st.session_state.app_page == APP_PAGE_INTRO:
+    _show_product_intro_page(st.session_state.get("national_result"))
+    _render_footer()
     st.stop()
 
-mission_key, state_focus, district_focus, confidence_label, run_button = _render_top_controls()
-
-if run_button:
-    with st.spinner("Running agent gates..."):
-        st.session_state.latest_result = _run_plan(mission_key, state_focus, district_focus, confidence_label)
-
+_apply_pending_map_jump()
 _show_national_alert(st.session_state.get("national_result"))
 
 result = st.session_state.latest_result or st.session_state.get("national_result")
 _summary_metrics(result)
 
+mission_key, state_focus, district_focus, confidence_label, run_button = _render_top_controls()
+if run_button:
+    result = st.session_state.latest_result or st.session_state.get("national_result")
+
 if result is None:
     _show_empty_state()
 else:
     selected_view = _stage_selector()
-    _render_story_path(selected_view)
     _render_stage(selected_view, result)
+
+_render_footer()

@@ -53,6 +53,10 @@ def _deterministic_summary(
 
 
 def _llm_summary(prompt: str) -> str | None:
+    enabled = os.environ.get("CARE_CONVOY_ENABLE_LLM_SUMMARY", "").strip().lower()
+    if enabled not in {"1", "true", "yes"}:
+        return None
+
     endpoint = os.environ.get("PRIMARY_LLM_ENDPOINT", "")
     if not endpoint:
         return None

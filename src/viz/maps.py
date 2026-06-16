@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import colorsys
 import re
+from typing import Any
 
 import pandas as pd
 import pydeck as pdk
@@ -49,9 +50,37 @@ def _point_frame(
         points["region"] = frame.loc[points.index, "state"].fillna("")
     else:
         points["region"] = ""
+    if "district" in frame.columns:
+        points["district"] = frame.loc[points.index, "district"].fillna("")
+    elif "address_city" in frame.columns:
+        points["district"] = frame.loc[points.index, "address_city"].fillna("")
+    else:
+        points["district"] = ""
+    points["state"] = points["region"]
     points["lat"] = points["latitude"]
     points["lon"] = points["longitude"]
-    return points[["lat", "lon", "label", "kind", "region"]]
+    return points[["lat", "lon", "label", "kind", "region", "district", "state"]]
+
+
+def _selected_object(event: Any) -> dict[str, Any] | None:
+    selection = getattr(event, "selection", None)
+    if selection is None and isinstance(event, dict):
+        selection = event.get("selection")
+    if not selection:
+        return None
+
+    objects = getattr(selection, "objects", None)
+    if objects is None and isinstance(selection, dict):
+        objects = selection.get("objects")
+    if not isinstance(objects, dict):
+        return None
+
+    for layer_id in ("district-points", "facility-points"):
+        layer_objects = objects.get(layer_id)
+        if layer_objects:
+            selected = layer_objects[0]
+            return dict(selected) if isinstance(selected, dict) else None
+    return None
 
 
 def _zoom(points: pd.DataFrame) -> float:
@@ -76,7 +105,7 @@ def _zoom(points: pd.DataFrame) -> float:
     return 4.6
 
 
-def render_map(districts: pd.DataFrame, facilities: pd.DataFrame, height: int = 430) -> None:
+def render_map(districts: pd.DataFrame, facilities: pd.DataFrame, height: int = 430) -> dict[str, Any] | None:
     district_points = pd.DataFrame()
     facility_points = pd.DataFrame()
     if not districts.empty and {"latitude", "longitude", "district"}.issubset(districts.columns):
@@ -86,7 +115,7 @@ def render_map(districts: pd.DataFrame, facilities: pd.DataFrame, height: int = 
 
     if district_points.empty and facility_points.empty:
         st.info("Map coordinates are not available yet for this result set.")
-        return
+        return None
 
     all_points = pd.concat([district_points, facility_points], ignore_index=True)
     center_lat = float(all_points["lat"].mean())
@@ -101,6 +130,7 @@ def render_map(districts: pd.DataFrame, facilities: pd.DataFrame, height: int = 
             pdk.Layer(
                 "ScatterplotLayer",
                 data=district_points,
+                id="district-points",
                 get_position="[lon, lat]",
                 get_radius=24000,
                 radius_min_pixels=7,
@@ -109,6 +139,7 @@ def render_map(districts: pd.DataFrame, facilities: pd.DataFrame, height: int = 
                 get_line_color=[255, 255, 255, 180],
                 line_width_min_pixels=1,
                 pickable=True,
+                auto_highlight=True,
             )
         )
     if not facility_points.empty:
@@ -116,6 +147,7 @@ def render_map(districts: pd.DataFrame, facilities: pd.DataFrame, height: int = 
             pdk.Layer(
                 "ScatterplotLayer",
                 data=facility_points,
+                id="facility-points",
                 get_position="[lon, lat]",
                 get_radius=17000,
                 radius_min_pixels=5,
@@ -124,6 +156,7 @@ def render_map(districts: pd.DataFrame, facilities: pd.DataFrame, height: int = 
                 get_line_color=[255, 255, 255, 220],
                 line_width_min_pixels=1,
                 pickable=True,
+                auto_highlight=True,
             )
         )
 
@@ -137,6 +170,14 @@ def render_map(districts: pd.DataFrame, facilities: pd.DataFrame, height: int = 
             bearing=0,
         ),
         layers=layers,
-        tooltip={"html": "<b>{label}</b><br/>{kind}<br/>{region}", "style": {"fontFamily": "sans-serif"}},
+        tooltip={"html": "<b>{label}</b><br/>{kind}<br/>{region}<br/>Click to focus this place", "style": {"fontFamily": "sans-serif"}},
     )
-    st.pydeck_chart(deck, width="stretch")
+    event = st.pydeck_chart(
+        deck,
+        width="stretch",
+        height=height,
+        on_select="rerun",
+        selection_mode="single-object",
+        key="planner_map",
+    )
+    return _selected_object(event)

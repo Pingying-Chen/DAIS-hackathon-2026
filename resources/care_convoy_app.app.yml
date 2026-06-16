@@ -8,6 +8,8 @@ resources:
       permissions:
         - group_name: users
           level: CAN_USE
+        - user_name: zliang29@asu.edu
+          level: CAN_USE
         - user_name: ${var.workspace_user_name}
           level: CAN_MANAGE
       resources:

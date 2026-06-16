@@ -101,6 +101,7 @@ def test_run_agent_reports_mixed_sources_truthfully(monkeypatch) -> None:
 
 
 def test_run_agent_returns_mission_control_v5_3_contract(monkeypatch) -> None:
+    monkeypatch.setenv("CARE_CONVOY_ENABLE_LLM_SUMMARY", "true")
     districts = _frame(
         [
             {

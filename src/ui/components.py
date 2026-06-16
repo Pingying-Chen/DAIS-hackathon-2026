@@ -10,13 +10,14 @@ def hero_header(eyebrow: str, title: str, subtitle: str, chips: list[tuple[str, 
         f"<span class='db-chip'><strong>{escape(label)}</strong>{escape(value)}</span>"
         for label, value in chips
     )
+    chip_row = f"<div class=\"db-chip-row\">{chip_html}</div>" if chip_html else ""
     st.markdown(
         (
             f"<section class=\"db-hero\">"
             f"<span class=\"db-eyebrow\">{escape(eyebrow)}</span>"
             f"<h1 class=\"db-title\">{escape(title)}</h1>"
             f"<p class=\"db-subtitle\">{escape(subtitle)}</p>"
-            f"<div class=\"db-chip-row\">{chip_html}</div>"
+            f"{chip_row}"
             f"</section>"
         ),
         unsafe_allow_html=True,

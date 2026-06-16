@@ -54,11 +54,16 @@ def build_confidence_chart(df: pd.DataFrame, label_column: str, value_column: st
 
     theme = tokens()
     chart_df = _chart_frame(df, [label_column, value_column]).head(8)
+    label_title = label_column.replace("_", " ").title()
     chart = px.bar(
         chart_df,
         x=value_column,
         y=label_column,
         orientation="h",
+        labels={
+            value_column: "Priority score (0-100; higher means stronger starting point)",
+            label_column: label_title,
+        },
         color=value_column,
         color_continuous_scale=[
             _css_hsl_to_hex(str(theme["surface_hi"])),
@@ -66,7 +71,7 @@ def build_confidence_chart(df: pd.DataFrame, label_column: str, value_column: st
             _css_hsl_to_hex(str(theme["interactive"])),
         ],
     )
-    chart.update_traces(marker_line_width=0, hovertemplate="%{y}: %{x:.1f}<extra></extra>")
+    chart.update_traces(marker_line_width=0, hovertemplate="%{y}: %{x:.1f} on a 0-100 scale<extra></extra>")
     return _apply_chart_theme(chart)
 
 
@@ -78,16 +83,27 @@ def build_tradeoff_chart(df: pd.DataFrame) -> Figure | None:
     theme = tokens()
     chart_df = _chart_frame(df, ["name", "urgency_support", "capability_fit", "trust_score"])
     long_df = chart_df.melt(id_vars="name", var_name="metric", value_name="score")
+    metric_labels = {
+        "urgency_support": "Urgency support (0-100)",
+        "capability_fit": "Facility fit (0-100)",
+        "trust_score": "Trust support (0-100)",
+    }
+    long_df["Metric"] = long_df["metric"].map(metric_labels)
     chart = px.bar(
         long_df,
-        x="metric",
+        x="Metric",
         y="score",
         color="name",
         barmode="group",
+        labels={
+            "Metric": "Comparison signal",
+            "score": "Score (0-100; higher means stronger)",
+            "name": "Facility",
+        },
         color_discrete_sequence=[
             _css_hsl_to_hex(str(theme["interactive"])),
             _css_hsl_to_hex(str(theme["accent"])),
         ],
     )
-    chart.update_traces(hovertemplate="%{fullData.name}: %{y:.1f}<extra></extra>")
+    chart.update_traces(hovertemplate="%{fullData.name}: %{y:.1f} on a 0-100 scale<extra></extra>")
     return _apply_chart_theme(chart)

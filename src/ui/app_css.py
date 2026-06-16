@@ -13,6 +13,11 @@ html, body, [data-testid="stAppViewContainer"] {
   background: transparent;
 }
 
+[data-testid="stToolbar"],
+[data-testid="stAppDeployButton"] {
+  display: none !important;
+}
+
 #MainMenu, footer {
   visibility: hidden;
 }
@@ -26,7 +31,7 @@ html, body, [data-testid="stAppViewContainer"] {
 
 [data-testid="stMainBlockContainer"] {
   max-width: 100%;
-  padding: 14px 16px 22px 16px;
+  padding: 42px 88px 52px 88px;
 }
 
 [data-testid="stSidebar"] {
@@ -38,9 +43,9 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 .db-hero {
-  padding: 8px 2px 12px 2px;
+  padding: 12px 0 18px 0;
   border-bottom: 1px solid var(--db-outline);
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .db-eyebrow {
@@ -91,6 +96,8 @@ html, body, [data-testid="stAppViewContainer"] {
   background: color-mix(in srgb, var(--db-surface) 62%, transparent);
   font-size: 11px;
   color: var(--db-muted);
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .db-chip strong {
@@ -134,6 +141,7 @@ html, body, [data-testid="stAppViewContainer"] {
   color: var(--db-muted);
   font-size: 11px;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .db-alert-strip {
@@ -227,6 +235,7 @@ html, body, [data-testid="stAppViewContainer"] {
   font-size: 13px;
   line-height: 1.25;
   overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .db-intro-hero {
@@ -279,6 +288,7 @@ html, body, [data-testid="stAppViewContainer"] {
   color: var(--db-text);
   font-size: 13px;
   line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .db-pipeline-step p {
@@ -286,13 +296,14 @@ html, body, [data-testid="stAppViewContainer"] {
   color: var(--db-muted);
   font-size: 11px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .db-kpis {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-  margin: 10px 0 12px 0;
+  gap: 16px;
+  margin: 12px 0 16px 0;
 }
 
 .db-kpi-card {
@@ -316,6 +327,7 @@ html, body, [data-testid="stAppViewContainer"] {
   font-weight: 800;
   color: var(--db-text);
   overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .db-kpi-accent {
@@ -327,13 +339,15 @@ html, body, [data-testid="stAppViewContainer"] {
   font-size: 11px;
   color: var(--db-muted);
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .db-grid {
   display: grid;
-  gap: 10px;
+  gap: 16px;
   grid-template-columns: repeat(var(--db-cols, 2), minmax(0, 1fr));
   align-items: stretch;
+  margin: 0 0 16px 0;
 }
 
 .db-card {
@@ -345,8 +359,13 @@ html, body, [data-testid="stAppViewContainer"] {
   animation: db-fade-up var(--db-dur-medium) var(--db-ease-emphatic);
 }
 
+.db-card:not(.db-grid-card) {
+  margin: 0 0 16px 0;
+}
+
 .db-grid-card {
   height: 100%;
+  margin: 0;
   box-shadow: none;
 }
 
@@ -355,6 +374,7 @@ html, body, [data-testid="stAppViewContainer"] {
   font-size: 14px;
   font-weight: 800;
   color: var(--db-text);
+  overflow-wrap: anywhere;
 }
 
 .db-card-copy {
@@ -362,6 +382,7 @@ html, body, [data-testid="stAppViewContainer"] {
   font-size: 12px;
   line-height: 1.5;
   color: var(--db-muted);
+  overflow-wrap: anywhere;
 }
 
 .db-bullet-list {
@@ -379,6 +400,7 @@ html, body, [data-testid="stAppViewContainer"] {
   font-size: 12px;
   line-height: 1.45;
   color: var(--db-muted);
+  overflow-wrap: anywhere;
 }
 
 .db-bullet-list li::before {
@@ -397,6 +419,61 @@ html, body, [data-testid="stAppViewContainer"] {
   font-size: 11px;
   color: color-mix(in srgb, var(--db-muted) 84%, white);
   line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.db-evidence-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0 0 16px 0;
+}
+
+.db-evidence-card {
+  padding: 14px 15px;
+  border: 1px solid var(--db-outline);
+  border-radius: var(--db-radius);
+  background: color-mix(in srgb, var(--db-surface) 82%, transparent);
+}
+
+.db-evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.db-evidence-list li {
+  display: grid;
+  grid-template-columns: minmax(96px, 0.32fr) minmax(0, 1fr);
+  gap: 8px 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--db-outline);
+}
+
+.db-evidence-list strong {
+  color: var(--db-text);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.db-evidence-list span {
+  color: var(--db-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.db-evidence-list em {
+  grid-column: 2;
+  color: color-mix(in srgb, var(--db-muted) 84%, white);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .db-section-label {
@@ -433,6 +510,7 @@ html, body, [data-testid="stAppViewContainer"] {
   font-size: 11px;
   line-height: 1.35;
   color: var(--db-muted);
+  overflow-wrap: anywhere;
 }
 
 .db-agent-evidence {
@@ -443,8 +521,10 @@ html, body, [data-testid="stAppViewContainer"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 68px;
+  min-width: 84px;
+  width: auto;
   height: 28px;
+  padding: 0 10px;
   border-radius: 999px;
   font-size: 11px;
   font-weight: 800;
@@ -508,8 +588,8 @@ html, body, [data-testid="stAppViewContainer"] {
 .db-inline-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 10px;
+  gap: 16px;
+  margin: 0 0 16px 0;
 }
 
 .db-inline-metric {
@@ -533,6 +613,7 @@ html, body, [data-testid="stAppViewContainer"] {
   font-weight: 800;
   color: var(--db-text);
   overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .db-filter-row {
@@ -553,6 +634,8 @@ html, body, [data-testid="stAppViewContainer"] {
   background: color-mix(in srgb, var(--db-surface-hi) 68%, transparent);
   font-size: 10px;
   line-height: 1.2;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .db-filter-pill strong {
@@ -615,6 +698,61 @@ html, body, [data-testid="stAppViewContainer"] {
   background: color-mix(in srgb, var(--db-interactive) 10%, transparent);
 }
 
+.db-caution-summary p {
+  margin: 0 0 10px 0;
+  color: var(--db-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.db-caution-summary ul {
+  margin: 0 0 12px 0;
+  padding-left: 18px;
+  color: var(--db-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.db-caution-summary li {
+  margin: 5px 0;
+  overflow-wrap: anywhere;
+}
+
+.db-caution-panel {
+  margin: 0 0 16px 0;
+  padding: 12px 13px;
+  border: 1px solid var(--db-outline);
+  border-radius: var(--db-radius);
+  background: color-mix(in srgb, var(--db-surface-hi) 64%, transparent);
+}
+
+.db-label-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 2px 0 10px 0;
+}
+
+.db-label-legend span {
+  display: inline-flex;
+  gap: 5px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border: 1px solid var(--db-outline);
+  border-radius: 999px;
+  color: var(--db-muted);
+  background: color-mix(in srgb, var(--db-surface-hi) 62%, transparent);
+  font-size: 11px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.db-label-legend strong {
+  color: var(--db-text);
+}
+
 .db-action-panel {
   background: color-mix(in srgb, var(--db-surface) 88%, transparent);
 }
@@ -632,10 +770,26 @@ html, body, [data-testid="stAppViewContainer"] {
   color: var(--db-text);
   font-size: 12px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+[data-testid="stButton"] button,
+[data-testid="stFormSubmitButton"] button,
+[data-testid="stBaseButton-secondary"],
+[data-testid="stBaseButton-primary"] {
+  min-height: 40px !important;
+  white-space: normal !important;
+}
+
+[data-testid="stButton"] button p,
+[data-testid="stFormSubmitButton"] button p,
+[data-testid="stRadio"] label p {
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
 }
 
 .db-map-caption {
-  margin-top: 7px;
+  margin: 7px 0 16px 0;
   font-size: 11px;
   color: var(--db-muted);
 }
@@ -649,6 +803,18 @@ html, body, [data-testid="stAppViewContainer"] {
 
 [data-testid="stStatusWidget"] {
   display: none !important;
+}
+
+.db-app-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--db-outline);
+  color: var(--db-muted);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 [data-testid="stDeckGlJsonChart"],
@@ -707,6 +873,10 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 @media (max-width: 1100px) {
+  [data-testid="stMainBlockContainer"] {
+    padding: 34px 48px 44px 48px;
+  }
+
   .db-alert-strip {
     grid-template-columns: 1fr;
   }
@@ -736,7 +906,7 @@ html, body, [data-testid="stAppViewContainer"] {
 
 @media (max-width: 720px) {
   [data-testid="stMainBlockContainer"] {
-    padding: 12px;
+    padding: 24px;
   }
 
   .db-kpis,
@@ -748,6 +918,14 @@ html, body, [data-testid="stAppViewContainer"] {
 
   .db-agent-row {
     grid-template-columns: 1fr;
+  }
+
+  .db-evidence-list li {
+    grid-template-columns: 1fr;
+  }
+
+  .db-evidence-list em {
+    grid-column: 1;
   }
 }
 """
